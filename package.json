@@ -1,6 +1,6 @@
 {
   "name": "easypanel-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP Server for Easypanel — full control of deployments, services, env vars, logs and databases from Claude Code, Cursor and Claude Desktop",
   "type": "module",
   "main": "dist/index.js",

@@ -1,52 +1,32 @@
-# Easypanel MCP — Como incluir neste projeto
+# Easypanel — Contexto para o CLAUDE.md
 
-Cole este bloco no `CLAUDE.md` do seu projeto para que o Claude saiba como usar o Easypanel:
+Cole o bloco abaixo no `CLAUDE.md` do seu projeto, preenchendo os dados.
+A URL e o token já estão no `.mcp.json` — aqui só vai o contexto operacional.
 
 ---
 
-## Easypanel (Deploy e Gestão)
+## Easypanel
 
-Este projeto usa o **easypanel-mcp-server** para deploy e gestão de serviços.
-
-**Painel:** `https://SEU-PAINEL.EXEMPLO.COM`
 **Projeto Easypanel:** `NOME-DO-PROJETO`
-**Serviço principal:** `NOME-DO-SERVICO`
+**Serviço principal:** `NOME-DO-SERVICO` _(deixe em branco se ainda não existe — use `list_projects` para descobrir)_
 **Repo GitHub:** `owner/repo` — branch: `main`
-
-### Como fazer deploy
-
-```
-1. Verifique o serviço:   inspect_service projectName="NOME-DO-PROJETO" serviceName="NOME-DO-SERVICO"
-2. Dispare o deploy:      deploy_service  projectName="NOME-DO-PROJETO" serviceName="NOME-DO-SERVICO"
-3. Acompanhe:             list_actions
-```
 
 ### Regras para este projeto
 
-- SEMPRE inspecione o serviço antes de alterar qualquer configuração
-- Confirme o contexto `[Contexto ativo: projeto="X" | serviço="Y"]` antes de executar
-- Operações destrutivas requerem `confirm: "CONFIRMO"` — não execute sem confirmação explícita do usuário
-- Depois de alterar env vars, sempre avise que é necessário fazer um novo deploy
+- Antes de qualquer operação, use `inspect_service` para ver o estado atual
+- Sempre confirme o contexto `[Contexto ativo: projeto="X" | serviço="Y"]` antes de executar
+- Operações destrutivas requerem `confirm: "CONFIRMO"` — não execute sem o usuário confirmar explicitamente
+- Após alterar env vars, avise que é necessário fazer um novo deploy para aplicar
+
+### Fluxo de deploy
+
+```
+1. list_projects                                          → descubra o projeto/serviço
+2. inspect_service projectName="X" serviceName="Y"       → veja estado atual
+3. deploy_service  projectName="X" serviceName="Y"       → dispare o deploy
+4. list_actions                                           → acompanhe o progresso
+```
 
 ---
 
-## Configuração do MCP (Claude Code / Cursor)
-
-Adicione ao `.mcp.json` do projeto ou ao `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "easypanel-mcp": {
-      "command": "node",
-      "args": ["/CAMINHO/PARA/easypanel-mcp-server/dist/index.js"],
-      "env": {
-        "EASYPANEL_URL": "https://SEU-PAINEL.EXEMPLO.COM",
-        "EASYPANEL_TOKEN": "SEU-TOKEN-API"
-      }
-    }
-  }
-}
-```
-
-**Token:** Easypanel → Settings → API → Generate Token
+_A conexão com o Easypanel (URL + token) está no `.mcp.json` deste projeto — não é necessário repetir aqui._
