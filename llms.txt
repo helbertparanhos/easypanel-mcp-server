@@ -1,0 +1,88 @@
+# easypanel-mcp-server
+
+> MCP Server for full Easypanel control via Claude Code, Cursor and Claude Desktop.
+
+easypanel-mcp-server is a Model Context Protocol server that exposes 37 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read logs, manage domains, create databases and monitor infrastructure directly from Claude Code or Cursor, without leaving the editor.
+
+## Available tools (37)
+
+- `list_projects`: List all Easypanel projects with their services and status
+- `get_project`: Get full details of a project including all services
+- `create_project`: Create a new project
+- `delete_project`: Permanently delete a project and all its services — requires confirm: "CONFIRMO"
+- `inspect_service`: Get complete service config: source, env vars, deploy settings, mounts, ports, resources. Use BEFORE any update to preserve current state.
+- `create_service`: Create a new app service in a project
+- `rename_service`: Rename or move a service — requires confirm: "CONFIRMO"
+- `destroy_service`: Permanently destroy a service — requires confirm: "CONFIRMO"
+- `deploy_service`: Trigger a deploy with the current source configuration
+- `start_service`: Start a stopped service
+- `stop_service`: Stop a service in production — requires confirm: "CONFIRMO"
+- `restart_service`: Restart a service
+- `get_service_error`: Get the last recorded error from a service — use for debugging
+- `get_service_notes`: Read notes saved on a service
+- `set_service_notes`: Save notes on a service (markdown supported)
+- `set_source_github`: Configure GitHub as the deploy source (owner, repo, branch, path)
+- `set_source_image`: Configure a Docker image as the deploy source
+- `enable_github_deploy`: Enable auto-deploy on every GitHub push
+- `disable_github_deploy`: Disable GitHub auto-deploy
+- `list_actions`: List running or recent deploy/build jobs — use to track deploy progress
+- `get_action`: Get details and logs of a specific action by ID
+- `get_env_vars`: List all environment variables. Sensitive values (KEY, SECRET, TOKEN, PASSWORD) are masked by default. Use include_values: true to reveal.
+- `set_env_var`: Add or update ONE env var safely — reads current state before writing, never wipes other vars
+- `delete_env_var`: Remove ONE env var — requires confirm: "CONFIRMO"
+- `get_service_logs`: Get container logs (last N lines, max 500)
+- `get_build_logs`: Get build/deploy logs from recent actions
+- `get_system_stats`: Get server metrics: CPU, memory, disk, network, uptime
+- `list_domains`: List all domains configured for a service
+- `add_domain`: Add a custom domain with automatic HTTPS via Let's Encrypt
+- `remove_domain`: Remove a domain — requires confirm: "CONFIRMO"
+- `set_primary_domain`: Set the primary domain for a service
+- `create_database`: Create a Postgres, MySQL, MariaDB, MongoDB or Redis service
+- `inspect_database`: Get database details including credentials and connection string
+- `destroy_database`: Permanently destroy a database and all its data — requires confirm: "CONFIRMO"
+- `get_docker_stats`: Get Docker container stats (CPU, memory, network per container)
+- `get_storage_stats`: Get server storage usage
+- `get_service_stats`: Get metrics for a specific service container
+
+## Quick start
+
+Add to your `.mcp.json` or `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "easypanel-mcp": {
+      "command": "npx",
+      "args": ["-y", "easypanel-mcp-server"],
+      "env": {
+        "EASYPANEL_URL": "https://your-panel.example.com",
+        "EASYPANEL_TOKEN": "your-api-token"
+      }
+    }
+  }
+}
+```
+
+## Required environment variables
+
+- `EASYPANEL_URL` (required): Your Easypanel panel URL without trailing slash
+- `EASYPANEL_TOKEN` (required): API token — generate at Easypanel → Settings → API → Generate Token
+
+## Safety features
+
+Every response that touches a project/service starts with a context banner:
+```
+[Contexto ativo: projeto="my-project" | serviço="my-api"]
+```
+
+Destructive actions (delete, destroy, stop) return `status: "BLOQUEADO"` unless `confirm: "CONFIRMO"` is passed explicitly. Env var updates use read-modify-write to never accidentally wipe existing variables.
+
+## Known limitations
+
+- Container exec (interactive console) is not available via the Easypanel tRPC API — use `get_service_logs` and `get_service_error` for debugging
+- Log streaming is best-effort; falls back to last service error if the log endpoint is unavailable
+
+## Links
+
+- GitHub: https://github.com/helbertparanhos/easypanel-mcp-server
+- npm: https://npmjs.com/package/easypanel-mcp-server
