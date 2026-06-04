@@ -27,7 +27,11 @@
     "cursor",
     "deployment",
     "docker",
-    "model-context-protocol"
+    "model-context-protocol",
+    "automation",
+    "devops",
+    "hosting",
+    "strat-academy"
   ],
   "author": "helbertparanhos",
   "license": "MIT",
