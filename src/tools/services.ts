@@ -133,6 +133,19 @@ export const serviceTools: Tool[] = [
     },
   },
   {
+    name: "get_exposed_ports",
+    description:
+      "Lista as portas expostas (publicadas no host) de um serviço. Use para descobrir em quais portas o serviço está acessível externamente.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectName: { type: "string", description: "Nome do projeto" },
+        serviceName: { type: "string", description: "Nome do serviço" },
+      },
+      required: ["projectName", "serviceName"],
+    },
+  },
+  {
     name: "get_service_notes",
     description: "Lê as notas/anotações salvas no serviço.",
     inputSchema: {
@@ -276,6 +289,11 @@ export async function handleServiceTool(name: string, args: Args) {
 
   if (name === "get_service_error") {
     const result = await client.query("services.common.getServiceError", { projectName, serviceName });
+    return { content: [{ type: "text" as const, text: ok(ctx, result) }] };
+  }
+
+  if (name === "get_exposed_ports") {
+    const result = await client.query("services.app.getExposedPorts", { projectName, serviceName });
     return { content: [{ type: "text" as const, text: ok(ctx, result) }] };
   }
 

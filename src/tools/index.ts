@@ -7,6 +7,7 @@ import { logTools, handleLogTool } from "./logs.js";
 import { domainTools, handleDomainTool } from "./domains.js";
 import { databaseTools, handleDatabaseTool } from "./databases.js";
 import { monitoringTools, handleMonitoringTool } from "./monitoring.js";
+import { containerTools, handleContainerTool } from "./containers.js";
 
 export const allTools: Tool[] = [
   ...projectTools,
@@ -17,6 +18,7 @@ export const allTools: Tool[] = [
   ...domainTools,
   ...databaseTools,
   ...monitoringTools,
+  ...containerTools,
 ];
 
 const projectToolNames = new Set(projectTools.map((t) => t.name));
@@ -27,6 +29,7 @@ const logToolNames = new Set(logTools.map((t) => t.name));
 const domainToolNames = new Set(domainTools.map((t) => t.name));
 const databaseToolNames = new Set(databaseTools.map((t) => t.name));
 const monitoringToolNames = new Set(monitoringTools.map((t) => t.name));
+const containerToolNames = new Set(containerTools.map((t) => t.name));
 
 export async function handleTool(name: string, args: Record<string, unknown>) {
   if (projectToolNames.has(name)) return handleProjectTool(name, args);
@@ -37,5 +40,6 @@ export async function handleTool(name: string, args: Record<string, unknown>) {
   if (domainToolNames.has(name)) return handleDomainTool(name, args);
   if (databaseToolNames.has(name)) return handleDatabaseTool(name, args);
   if (monitoringToolNames.has(name)) return handleMonitoringTool(name, args);
+  if (containerToolNames.has(name)) return handleContainerTool(name, args);
   throw new Error(`Tool não encontrada: ${name}`);
 }

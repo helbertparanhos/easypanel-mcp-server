@@ -2,9 +2,9 @@
 
 > MCP Server for full Easypanel control via Claude Code, Cursor and Claude Desktop.
 
-easypanel-mcp-server is a Model Context Protocol server that exposes 37 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read logs, manage domains, create databases and monitor infrastructure directly from Claude Code or Cursor, without leaving the editor.
+easypanel-mcp-server is a Model Context Protocol server that exposes 41 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read runtime logs, exec commands inside containers, manage domains, create databases and monitor infrastructure directly from Claude Code or Cursor, without leaving the editor.
 
-## Available tools (37)
+## Available tools (41)
 
 - `list_projects`: List all Easypanel projects with their services and status
 - `get_project`: Get full details of a project including all services
@@ -25,13 +25,14 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 37 tools fo
 - `set_source_image`: Configure a Docker image as the deploy source
 - `enable_github_deploy`: Enable auto-deploy on every GitHub push
 - `disable_github_deploy`: Disable GitHub auto-deploy
-- `list_actions`: List running or recent deploy/build jobs — use to track deploy progress
+- `list_actions`: List running or recent deploy/build jobs (filterable by projectName/serviceName/type) — use to track deploy progress
 - `get_action`: Get details and logs of a specific action by ID
 - `get_env_vars`: List all environment variables. Sensitive values (KEY, SECRET, TOKEN, PASSWORD) are masked by default. Use include_values: true to reveal.
 - `set_env_var`: Add or update ONE env var safely — reads current state before writing, never wipes other vars
 - `delete_env_var`: Remove ONE env var — requires confirm: "CONFIRMO"
-- `get_service_logs`: Get container logs (last N lines, max 500)
-- `get_build_logs`: Get build/deploy logs from recent actions
+- `get_service_logs`: Get live container runtime logs via WebSocket (last N lines, max 500)
+- `get_build_logs`: Get the full build/deploy log of the service's latest deployment
+- `get_exposed_ports`: List a service's host-published ports
 - `get_system_stats`: Get server metrics: CPU, memory, disk, network, uptime
 - `list_domains`: List all domains configured for a service
 - `add_domain`: Add a custom domain with automatic HTTPS via Let's Encrypt
@@ -43,6 +44,9 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 37 tools fo
 - `get_docker_stats`: Get Docker container stats (CPU, memory, network per container)
 - `get_storage_stats`: Get server storage usage
 - `get_service_stats`: Get metrics for a specific service container
+- `list_containers`: List a service's running Docker containers (ID, image, command, status, ports)
+- `exec_in_container`: Run a shell command inside a service's container and return its output — for runtime debugging
+- `get_docker_events`: Capture real-time Docker events during a short window (start/stop/kill/die/exec/health)
 
 ## Quick start
 

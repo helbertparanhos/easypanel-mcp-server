@@ -1,15 +1,15 @@
 {
   "name": "easypanel-mcp-server",
   "displayName": "Easypanel MCP Server",
-  "description": "Full control of Easypanel from Claude Code, Cursor and Claude Desktop — deploy, logs, env vars, domains, databases and monitoring. 37 tools with built-in safety guards.",
-  "version": "1.0.1",
+  "description": "Full control of Easypanel from Claude Code, Cursor and Claude Desktop — deploy, runtime logs, container exec, env vars, domains, databases and monitoring. 41 tools with built-in safety guards.",
+  "version": "1.1.0",
   "author": "helbertparanhos",
   "license": "MIT",
   "category": "DevOps",
   "tags": ["easypanel", "deployment", "docker", "devops", "hosting", "databases", "monitoring"],
   "repository": "https://github.com/helbertparanhos/easypanel-mcp-server",
   "npm": "easypanel-mcp-server",
-  "tools": 37,
+  "tools": 41,
   "transport": "stdio",
   "auth": "env",
   "envVars": [

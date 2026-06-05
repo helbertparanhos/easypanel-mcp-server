@@ -47,16 +47,28 @@ export async function handleMonitoringTool(name: string, args: Args) {
   if (name === "get_service_stats") {
     const { projectName, serviceName } = args as { projectName: string; serviceName: string };
     const ctx = contextHeader(projectName, serviceName);
-    const result = await client.query("monitorOld.getDockerTaskStats");
-    // Filtra pelo serviço específico se possível
-    const filtered =
-      Array.isArray(result)
-        ? result.filter(
-            (s: any) =>
-              s.name?.includes(serviceName) || s.serviceName === serviceName
-          )
-        : result;
-    return { content: [{ type: "text" as const, text: ok(ctx, filtered) }] };
+    // getDockerTaskStats retorna um objeto chaveado pelo nome do serviço Docker
+    // (`${projectName}_${serviceName}`), não um array. Indexamos a chave exata —
+    // antes o código retornava as métricas de TODOS os serviços por engano.
+    const result = await client.query<Record<string, unknown>>("monitorOld.getDockerTaskStats");
+    const key = `${projectName}_${serviceName}`;
+    const stats =
+      result && typeof result === "object" && !Array.isArray(result) ? result[key] : undefined;
+    if (stats === undefined) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              aviso: `Sem métricas para "${key}". O serviço pode estar parado.`,
+              servicos_disponiveis:
+                result && typeof result === "object" ? Object.keys(result) : [],
+            }),
+          },
+        ],
+      };
+    }
+    return { content: [{ type: "text" as const, text: ok(ctx, stats) }] };
   }
 
   throw new Error(`Tool desconhecida: ${name}`);

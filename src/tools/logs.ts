@@ -1,6 +1,6 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getClient } from "../client.js";
-import { contextHeader, ok } from "../context.js";
+import { contextHeader, ok, assertValidName } from "../context.js";
 
 export const logTools: Tool[] = [
   {
@@ -53,20 +53,22 @@ export async function handleLogTool(name: string, args: Args) {
       serviceName: string;
       lines?: number;
     };
+    assertValidName(projectName, "projectName");
+    assertValidName(serviceName, "serviceName");
     const ctx = contextHeader(projectName, serviceName);
     const safeLines = Math.min(Number(lines) || 100, 500);
 
-    // Encode path components to prevent path traversal
-    const safePath = `/api/logs/${encodeURIComponent(projectName)}/${encodeURIComponent(serviceName)}?lines=${safeLines}`;
-
+    // Logs de runtime do container chegam pelo WebSocket /ws/serviceLogs — o mesmo
+    // canal usado pela aba "Logs" da UI do Easypanel. O nome do serviço Docker é
+    // `${projectName}_${serviceName}`. Não depende do Advanced Logs (Loki/licença).
+    const dockerService = `${projectName}_${serviceName}`;
     try {
-      const res = await client.fetchRaw(safePath);
-      if (res.ok) {
-        const text = await res.text();
-        return { content: [{ type: "text" as const, text: ctx + text }] };
-      }
+      const logs = await client.streamServiceLogs(dockerService, { maxLines: safeLines });
+      const body = logs.trim().length > 0 ? logs : "(container sem saída de log recente)";
+      return { content: [{ type: "text" as const, text: ctx + body }] };
     } catch {
-      // Log endpoint may not exist; fall through to service error fallback
+      // Falha ao abrir o stream (serviço inexistente/parado, ou token sem acesso).
+      // Faz fallback para o último erro registrado do serviço.
     }
 
     const error = await client.query("services.common.getServiceError", { projectName, serviceName });
@@ -75,9 +77,10 @@ export async function handleLogTool(name: string, args: Args) {
         {
           type: "text" as const,
           text: ok(ctx, {
-            aviso: "Endpoint de logs em tempo real indisponível. Retornando último erro registrado.",
+            aviso:
+              "Não foi possível ler os logs de runtime via WebSocket (o serviço pode estar parado, não existir, ou o token não ter acesso). Retornando o último erro registrado.",
             ultimo_erro: error,
-            alternativa: "Use list_actions para ver logs de builds recentes",
+            alternativa: "Use get_build_logs para ver os logs do último deploy/build.",
           }),
         },
       ],
@@ -91,27 +94,66 @@ export async function handleLogTool(name: string, args: Args) {
     };
     const ctx = contextHeader(projectName, serviceName);
 
-    const actions = await client.query<any[]>("actions.listActions");
-    // Use && so we only match actions for this exact project+service combination
-    const relevant = Array.isArray(actions)
-      ? actions
-          .filter(
-            (a: any) =>
-              a.projectName === projectName && a.serviceName === serviceName
-          )
-          .slice(0, 5)
-      : actions;
+    // actions.listActions filtra no servidor por projeto/serviço/tipo. Buscamos as
+    // deployments mais recentes deste serviço (a lista global só guarda uma janela
+    // curta, então o filtro server-side é essencial para não "perder" o serviço).
+    const relevant = await client.query<any[]>("actions.listActions", {
+      projectName,
+      serviceName,
+      type: "deployment",
+      limit: 5,
+    });
+
+    const latest = Array.isArray(relevant) ? relevant[0] : undefined;
+    if (!latest) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              aviso: "Nenhuma ação de build/deploy encontrada para este serviço.",
+              projectName,
+              serviceName,
+            }),
+          },
+        ],
+      };
+    }
+
+    // O log completo do build fica no campo `log` de actions.getAction.
+    const detail = await client.query<any>("actions.getAction", { id: latest.id });
+    const buildLog: string =
+      typeof detail?.log === "string" ? detail.log : "(sem log disponível para esta ação)";
 
     return {
       content: [
         {
           type: "text" as const,
-          text: ok(ctx, {
-            projectName,
-            serviceName,
-            acoes_recentes: relevant,
-            dica: "Use get_action com o ID de uma ação para ver logs completos",
-          }),
+          text:
+            ctx +
+            JSON.stringify(
+              {
+                projectName,
+                serviceName,
+                acao: {
+                  id: latest.id,
+                  tipo: latest.type,
+                  status: latest.status,
+                  descricao: latest.description,
+                  criado_em: latest.createdAt,
+                },
+                acoes_recentes: relevant.slice(0, 5).map((a: any) => ({
+                  id: a.id,
+                  tipo: a.type,
+                  status: a.status,
+                  criado_em: a.createdAt,
+                })),
+              },
+              null,
+              2
+            ) +
+            "\n\n--- LOG DO BUILD ---\n" +
+            buildLog,
         },
       ],
     };

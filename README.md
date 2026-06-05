@@ -28,7 +28,7 @@
 
 Instead of switching between your editor and the Easypanel dashboard, you control everything from inside Claude: deploy from GitHub, update env vars, read logs, manage domains, create databases and monitor your server — all in natural language.
 
-It covers the full Easypanel tRPC API with **37 tools**, including safety guards that require explicit confirmation before any destructive action, and a context banner in every response so Claude always knows which project and service it is touching.
+It covers the full Easypanel tRPC API with **41 tools**, including container exec and live runtime logs, safety guards that require explicit confirmation before any destructive action, and a context banner in every response so Claude always knows which project and service it is touching.
 
 ---
 

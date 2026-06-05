@@ -76,8 +76,24 @@ export const deployTools: Tool[] = [
   {
     name: "list_actions",
     description:
-      "Lista as ações/jobs em execução ou recentes (deploys, builds, restarts). Use para acompanhar o progresso de um deploy.",
-    inputSchema: { type: "object", properties: {}, required: [] },
+      "Lista as ações/jobs em execução ou recentes (deploys, builds, restarts). A lista global guarda apenas uma janela curta — passe projectName/serviceName para filtrar no servidor e não perder ações de um serviço específico.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectName: { type: "string", description: "Filtrar por projeto (opcional)" },
+        serviceName: { type: "string", description: "Filtrar por serviço (opcional)" },
+        type: {
+          type: "string",
+          description: "Filtrar por tipo de ação, ex: deployment (opcional)",
+        },
+        limit: {
+          type: "number",
+          description: "Número máximo de ações a retornar (default: 50)",
+          default: 50,
+        },
+      },
+      required: [],
+    },
   },
   {
     name: "get_action",
@@ -198,7 +214,20 @@ export async function handleDeployTool(name: string, args: Args) {
   }
 
   if (name === "list_actions") {
-    const result = await client.query("actions.listActions");
+    // actions.listActions valida o input como object — passar campos (ainda que só
+    // limit) evita o erro 400 "Expected object, received undefined" de antes.
+    // projectName/serviceName/type filtram no servidor.
+    const { projectName, serviceName, type, limit = 50 } = args as {
+      projectName?: string;
+      serviceName?: string;
+      type?: string;
+      limit?: number;
+    };
+    const input: Record<string, unknown> = { limit: Math.min(Number(limit) || 50, 200) };
+    if (projectName) input.projectName = projectName;
+    if (serviceName) input.serviceName = serviceName;
+    if (type) input.type = type;
+    const result = await client.query("actions.listActions", input);
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   }
 
