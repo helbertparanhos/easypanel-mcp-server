@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.3.0] - 2026-06-08
+
+### Fixed
+- **Deploy/restart de serviços Compose** — `deploy_service`, `restart_service` e `start_service` agora detectam o tipo do serviço (via `projects.listProjectsAndServices`) e roteiam para o namespace correto. Antes, essas tools batiam sempre em `services.app.*` e retornavam 404/500 num serviço **compose** — o agente não conseguia redeployar uma stack compose e precisava cair no painel. Agora uma única chamada funciona para app **e** compose, sem o agente precisar saber o tipo de antemão.
+  - Em compose, **restart/start = redeploy** (`services.compose.deployService`; `docker compose up` recria os containers).
+  - **stop_service** em compose retorna orientação acionável (não há procedure tRPC de stop confirmada para compose) em vez de um 404 opaco.
+  - Detecção é best-effort: se o tipo não for determinado, mantém o comportamento atual (`app`) — sem regressão.
+
+### Changed
+- Descrições de `deploy_service`/`restart_service`/`start_service` explicitam o suporte a compose — para o agente parar de desistir e cair no painel ao ver um serviço compose.
+
+### Verificação ao vivo
+- Forma de resposta de `projects.listProjectsAndServices` **confirmada** contra painel real (Easypanel v2.30.1): `{ projects: [...], services: [{ projectName, name, type, ... }] }` com `type` ∈ app/compose/postgres/mysql/mariadb/mongo/redis. A detecção de tipo casa exatamente (ex.: `aplicativos/strat-vexa → compose`).
+- O roteamento usa apenas a procedure confirmada `services.compose.deployService`. Eventuais `services.compose.start/stop/restartService` permanecem não confirmados — por isso restart/start de compose vão por redeploy e stop devolve orientação acionável.
+
+## [1.2.0] - 2026-06-08
+
+### Added
+- **Manutenção de servidor** — `prune_docker` (docker system prune global via `settings.systemPrune`) e `cleanup_docker_images` (remove imagens órfãs via `settings.cleanupDockerImages`).
+- **Recursos do serviço** — `set_service_resources`: define limites/reservas de CPU e memória (`services.app.updateResources`). Aceita update parcial (lê os valores atuais via inspect e faz merge, já que a API exige o objeto `resources` completo).
+- **Volumes** — `list_mounts` e `create_mount` (volume nomeado ou bind mount) via `mounts.*`.
+- **Portas** — `list_ports` e `create_port` (port mapping host→container) via `ports.*`.
+- **Docker Compose** — `create_compose`, `inspect_compose` e `deploy_compose` via `services.compose.*`.
+- **Infraestrutura (leitura)** — `list_users`, `list_certificates`, `list_nodes`.
+- **Operações de servidor** — `restart_panel` (`settings.restartEasypanel`) e `reboot_server` (`server.reboot`), ambos com `confirm: "CONFIRMO"`.
+- **`trpc_raw`** — escape hatch que chama qualquer uma das ~347 procedures tRPC do Easypanel em 43 namespaces (traefik, branding, cloudflareTunnel, box, backups, wordpress, etc). Leitura por padrão; escrita exige `isMutation:true` + `CONFIRMO`.
+- **Modo somente-leitura** — env `MCP_ACCESS_MODE=readonly` bloqueia TODA escrita (tools curadas e `trpc_raw`) na origem (`client.mutate`).
+- **`EASYPANEL_RAW_DISABLED`** — env para desligar o `trpc_raw` por completo em ambientes expostos a conteúdo não confiável.
+- **Documentação** — `docs/easypanel-api.md`: referência da API tRPC (arquitetura, 43 namespaces, procedures confirmadas mapeadas tool-a-tool, como descobrir novas procedures).
+- Total de tools: 41 → **57**. Novas categorias: maintenance, mounts, ports, compose, server, raw.
+
+### Security
+- **`list_users` redação de secrets** — `users.listUsers` devolve `apiToken` (texto puro), `twoFactorSecret` (TOTP) e hash de senha; agora só `id`, `email`, `admin`, `twoFactorEnabled` e `createdAt` são retornados. Os campos sensíveis nunca chegam ao contexto do LLM.
+- **`create_mount`** — bind mounts apontando para caminhos sensíveis do host (`/`, `/etc`, `/var/run/docker.sock`, etc.) exigem `CONFIRMO` (prevenção de escape de container).
+- **`create_port`** — portas privilegiadas (`publishedPort < 1024`) exigem `CONFIRMO`.
+- **`trpc_raw`** — nome da procedure validado por regex (`namespace.procedure`, sem `/`, `?`, `..`); `input` precisa ser objeto e tem teto de ~50KB; mutations exigem `CONFIRMO`.
+- **Ações destrutivas globais** — `prune_docker`, `reboot_server` e `restart_panel` todas atrás de `CONFIRMO`.
+- Validação `assertValidName` de `projectName`/`serviceName` estendida aos novos handlers (mounts, ports, compose).
+
+### Fixed
+- Schemas reais (validados em teste contra um Easypanel ao vivo) corrigidos: `mounts.createMount` e `ports.createPort` exigem os campos aninhados em `values` (porta usa `published`/`target`, não `publishedPort`/`targetPort`); `services.app.updateResources` exige o objeto `resources` com os 4 campos.
+
 ## [1.1.0] - 2026-06-05
 
 ### Added

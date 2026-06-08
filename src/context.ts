@@ -7,6 +7,16 @@ import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export const CONFIRM_KEYWORD = "CONFIRMO";
 
 /**
+ * Modo somente-leitura global. Com `MCP_ACCESS_MODE=readonly`, toda mutation é
+ * bloqueada em `EasyPanelClient.mutate` — útil para conectar o MCP a um painel de
+ * produção permitindo apenas inspeção/diagnóstico, sem risco de escrita acidental.
+ * Lido a cada chamada (e não no boot) para refletir mudanças de env em runtime/testes.
+ */
+export function isReadOnly(): boolean {
+  return (process.env.MCP_ACCESS_MODE || "").toLowerCase() === "readonly";
+}
+
+/**
  * Valida nomes de projeto/serviço antes de usá-los na construção do nome do
  * serviço Docker (`${projectName}_${serviceName}`) e na query string de
  * WebSockets. O Easypanel só aceita minúsculas, números, hífens e underscores —

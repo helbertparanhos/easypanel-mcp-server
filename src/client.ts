@@ -1,5 +1,6 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
+import { isReadOnly } from "./context.js";
 
 export class EasyPanelClient {
   private baseUrl: string;
@@ -29,6 +30,15 @@ export class EasyPanelClient {
   }
 
   async mutate<T>(procedure: string, input?: unknown): Promise<T> {
+    // Kill-switch global de escrita. Com MCP_ACCESS_MODE=readonly toda mutation é
+    // bloqueada na origem — cobre as tools curadas E o trpc_raw, sem depender de
+    // cada handler lembrar de checar. Reads (query) continuam liberados.
+    if (isReadOnly()) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Modo somente-leitura ativo (MCP_ACCESS_MODE=readonly): a operação de escrita "${procedure}" foi bloqueada.`
+      );
+    }
     const res = await fetch(`${this.baseUrl}/api/trpc/${procedure}`, {
       method: "POST",
       headers: {

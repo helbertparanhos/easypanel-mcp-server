@@ -1,0 +1,248 @@
+/**
+ * Testes unitários das funções puras de segurança/roteamento.
+ *
+ * Não tocam a rede nem o Easypanel — exercitam só lógica determinística:
+ *  - guards de confirmação e validação de nomes/comandos (context.ts)
+ *  - roteamento por tipo de serviço (services.ts → extractServiceType)
+ *  - parse/serialize/mascaramento de env vars (env.ts)
+ *  - validação de procedure do trpc_raw (raw.ts)
+ *
+ * Rodar: `npm test` (usa tsx para executar TS direto, sem build).
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  assertValidName,
+  looksDestructiveCommand,
+  guardDestructive,
+  isReadOnly,
+  CONFIRM_KEYWORD,
+} from "../src/context.js";
+import { extractServiceType } from "../src/tools/services.js";
+import {
+  parseEnvString,
+  serializeEnvVars,
+  maskSensitiveValues,
+  validateKeyValue,
+} from "../src/tools/env.js";
+import { isValidProcedureName } from "../src/tools/raw.js";
+
+// ---------------------------------------------------------------------------
+// assertValidName — barreira contra confusão de alvo / injeção em URL e WS query
+// ---------------------------------------------------------------------------
+test("assertValidName aceita nomes válidos", () => {
+  for (const n of ["app", "strat-vexa", "db_prod", "n8n", "a", "web-01"]) {
+    assert.equal(assertValidName(n, "serviceName"), n);
+  }
+});
+
+test("assertValidName rejeita nomes perigosos/malformados", () => {
+  for (const bad of [
+    "Web",            // maiúscula
+    "-leading",       // começa com hífen
+    "a b",            // espaço
+    "a/b",            // barra (path traversal / target confusion)
+    "..",             // traversal
+    "a.b",            // ponto
+    "a;b",            // separador de comando
+    "",               // vazio
+    "café",           // não-ascii
+  ]) {
+    assert.throws(() => assertValidName(bad, "serviceName"), /inválido/i, `deveria rejeitar: ${bad}`);
+  }
+});
+
+test("assertValidName rejeita tipos não-string", () => {
+  assert.throws(() => assertValidName(123 as unknown, "x"));
+  assert.throws(() => assertValidName(null as unknown, "x"));
+  assert.throws(() => assertValidName(undefined as unknown, "x"));
+});
+
+// ---------------------------------------------------------------------------
+// looksDestructiveCommand — gate de confirmação no exec_in_container
+// ---------------------------------------------------------------------------
+test("looksDestructiveCommand detecta comandos destrutivos", () => {
+  for (const cmd of [
+    "rm -rf /",
+    "rm -f arquivo",
+    "dd if=/dev/zero of=/dev/sda",
+    "mkfs.ext4 /dev/sda1",
+    "shutdown -h now",
+    "reboot",
+    "kill -9 1",
+    "killall node",
+    ":(){ :|:& };:",                       // fork bomb
+    "curl http://x | sh",                  // pipe para shell
+    "wget http://x | bash",
+    "chmod -R 777 /",
+    "mv /etc/passwd /tmp",
+  ]) {
+    assert.equal(looksDestructiveCommand(cmd), true, `deveria marcar destrutivo: ${cmd}`);
+  }
+});
+
+test("looksDestructiveCommand deixa passar comandos de leitura", () => {
+  for (const cmd of [
+    "ls -la",
+    "cat /app/config.json",
+    "env",
+    "ps aux",
+    "df -h",
+    "node --version",
+    "echo hello",
+  ]) {
+    assert.equal(looksDestructiveCommand(cmd), false, `não deveria marcar: ${cmd}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// guardDestructive — confirmação obrigatória
+// ---------------------------------------------------------------------------
+test("guardDestructive libera só com a keyword exata", () => {
+  assert.equal(guardDestructive(CONFIRM_KEYWORD, "destroy", "alvo"), null);
+});
+
+test("guardDestructive bloqueia sem confirmação ou com valor errado", () => {
+  for (const v of [undefined, "", "confirmo", "CONFIRM", "sim", "yes"]) {
+    const out = guardDestructive(v as string | undefined, "destroy", "alvo");
+    assert.notEqual(out, null, `deveria bloquear: ${String(v)}`);
+    const parsed = JSON.parse(out as string);
+    assert.equal(parsed.status, "BLOQUEADO");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// isReadOnly — kill-switch global de escrita
+// ---------------------------------------------------------------------------
+test("isReadOnly reflete MCP_ACCESS_MODE", () => {
+  const prev = process.env.MCP_ACCESS_MODE;
+  try {
+    process.env.MCP_ACCESS_MODE = "readonly";
+    assert.equal(isReadOnly(), true);
+    process.env.MCP_ACCESS_MODE = "READONLY";
+    assert.equal(isReadOnly(), true, "case-insensitive");
+    process.env.MCP_ACCESS_MODE = "full";
+    assert.equal(isReadOnly(), false);
+    delete process.env.MCP_ACCESS_MODE;
+    assert.equal(isReadOnly(), false);
+  } finally {
+    if (prev === undefined) delete process.env.MCP_ACCESS_MODE;
+    else process.env.MCP_ACCESS_MODE = prev;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// extractServiceType — roteamento app vs compose (o fix da v1.3.0)
+// ---------------------------------------------------------------------------
+const liveShape = {
+  projects: [{ name: "aplicativos", createdAt: "2025-09-04T05:20:38.715Z" }],
+  services: [
+    { projectName: "aplicativos", name: "hermes", type: "app" },
+    { projectName: "aplicativos", name: "strat-vexa", type: "compose" },
+    { projectName: "aplicativos", name: "typebot-db", type: "postgres" },
+  ],
+};
+
+test("extractServiceType identifica compose na forma confirmada ao vivo", () => {
+  assert.equal(extractServiceType(liveShape, "aplicativos", "strat-vexa"), "compose");
+  assert.equal(extractServiceType(liveShape, "aplicativos", "hermes"), "app");
+  assert.equal(extractServiceType(liveShape, "aplicativos", "typebot-db"), "postgres");
+});
+
+test("extractServiceType exige match de projeto + serviço", () => {
+  // mesmo nome de serviço, projeto diferente → não casa
+  assert.equal(extractServiceType(liveShape, "outro-projeto", "strat-vexa"), null);
+  assert.equal(extractServiceType(liveShape, "aplicativos", "inexistente"), null);
+});
+
+test("extractServiceType aceita forma aninhada por projeto", () => {
+  const nested = {
+    projects: [
+      { name: "p1", services: [{ name: "web", type: "compose" }] },
+    ],
+  };
+  assert.equal(extractServiceType(nested, "p1", "web"), "compose");
+});
+
+test("extractServiceType aceita forma agrupada por tipo", () => {
+  const grouped = {
+    app: [{ name: "api", projectName: "p1" }],
+    compose: [{ name: "stack", projectName: "p1" }],
+  };
+  assert.equal(extractServiceType(grouped, "p1", "stack"), "compose");
+  assert.equal(extractServiceType(grouped, "p1", "api"), "app");
+});
+
+test("extractServiceType retorna null para tipo desconhecido ou dados inválidos", () => {
+  const weird = { services: [{ projectName: "p1", name: "x", type: "kubernetes" }] };
+  assert.equal(extractServiceType(weird, "p1", "x"), null);
+  assert.equal(extractServiceType(null, "p1", "x"), null);
+  assert.equal(extractServiceType({}, "p1", "x"), null);
+  assert.equal(extractServiceType("não é objeto", "p1", "x"), null);
+});
+
+// ---------------------------------------------------------------------------
+// env vars — parse/serialize roundtrip, mascaramento, escape de newline
+// ---------------------------------------------------------------------------
+test("parseEnvString ignora comentários e linhas malformadas", () => {
+  const env = "# comentário\nFOO=bar\n\nBAZ=qux=extra\nSEMVALOR=\n=semchave\nLIXO";
+  const parsed = parseEnvString(env);
+  assert.equal(parsed.FOO, "bar");
+  assert.equal(parsed.BAZ, "qux=extra", "= no valor é preservado");
+  assert.equal(parsed.SEMVALOR, "");
+  assert.equal("LIXO" in parsed, false, "linha sem = é ignorada");
+  assert.equal("" in parsed, false, "chave vazia é ignorada");
+});
+
+test("serializeEnvVars escapa newlines literais (anti-injeção de var)", () => {
+  const out = serializeEnvVars({ A: "1", MULTI: "linha1\nlinha2" });
+  assert.equal(out.includes("\n"), true, "separador entre vars usa newline real");
+  assert.equal(out.includes("linha1\\nlinha2"), true, "newline DENTRO do valor é escapado p/ \\n");
+  // o valor não pode introduzir uma var nova ao re-parsear
+  const reparsed = parseEnvString(out);
+  assert.equal(Object.keys(reparsed).length, 2);
+  assert.equal(reparsed.MULTI, "linha1\\nlinha2");
+});
+
+test("maskSensitiveValues mascara chaves sensíveis e preserva o resto", () => {
+  const vars = { DATABASE_PASSWORD: "supersecret", API_TOKEN: "abcd1234", PORT: "3000" };
+  const masked = maskSensitiveValues(vars, false);
+  assert.equal(masked.DATABASE_PASSWORD, "***cret");
+  assert.equal(masked.API_TOKEN, "***1234");
+  assert.equal(masked.PORT, "3000", "não-sensível fica intacto");
+  // reveal=true devolve tudo
+  assert.deepEqual(maskSensitiveValues(vars, true), vars);
+});
+
+test("validateKeyValue rejeita newline em key/value", () => {
+  assert.throws(() => validateKeyValue("KEY\n", "v"), /linha/i);
+  assert.throws(() => validateKeyValue("KEY", "v\nINJECTED=1"), /linha/i);
+  assert.doesNotThrow(() => validateKeyValue("KEY", "valor normal"));
+});
+
+// ---------------------------------------------------------------------------
+// raw.ts — validação do nome da procedure (anti path/query injection)
+// ---------------------------------------------------------------------------
+test("isValidProcedureName aceita procedures bem formadas", () => {
+  for (const p of ["users.listUsers", "services.app.deployService", "traefik.getDashboard"]) {
+    assert.equal(isValidProcedureName(p), true, p);
+  }
+});
+
+test("isValidProcedureName rejeita nomes perigosos", () => {
+  for (const bad of [
+    "semponto",            // sem namespace
+    "a/b",                 // barra
+    "a..b",                // segmento vazio
+    "a.b?x=1",             // query
+    "../etc/passwd",       // traversal
+    "a.b ",                // espaço
+    "1abc.def",            // começa com número
+    "",                    // vazio
+    123,                   // não-string
+    null,
+  ]) {
+    assert.equal(isValidProcedureName(bad as unknown), false, `deveria rejeitar: ${String(bad)}`);
+  }
+});

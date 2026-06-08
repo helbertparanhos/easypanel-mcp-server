@@ -57,7 +57,7 @@ export const envTools: Tool[] = [
   },
 ];
 
-function parseEnvString(envStr: string): Record<string, string> {
+export function parseEnvString(envStr: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const line of envStr.split("\n")) {
     const trimmed = line.trim();
@@ -71,13 +71,13 @@ function parseEnvString(envStr: string): Record<string, string> {
   return result;
 }
 
-function serializeEnvVars(vars: Record<string, string>): string {
+export function serializeEnvVars(vars: Record<string, string>): string {
   return Object.entries(vars)
     .map(([k, v]) => `${k}=${v.replace(/\r?\n/g, "\\n")}`)
     .join("\n");
 }
 
-function maskSensitiveValues(
+export function maskSensitiveValues(
   vars: Record<string, string>,
   reveal: boolean
 ): Record<string, string> {
@@ -90,7 +90,7 @@ function maskSensitiveValues(
   );
 }
 
-function validateKeyValue(key: string, value: string): void {
+export function validateKeyValue(key: string, value: string): void {
   if (/[\r\n]/.test(key)) {
     throw new McpError(ErrorCode.InvalidParams, "key não pode conter quebras de linha");
   }

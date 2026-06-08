@@ -10,7 +10,7 @@ import {
 import { allTools, handleTool } from "./tools/index.js";
 
 const server = new Server(
-  { name: "easypanel-mcp", version: "1.1.0" },
+  { name: "easypanel-mcp", version: "1.3.0" },
   { capabilities: { tools: {} } }
 );
 

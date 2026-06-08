@@ -1,4 +1,4 @@
-import { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { Tool, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { getClient } from "../client.js";
 import { contextHeader, guardDestructive, ok, CONFIRM_KEYWORD } from "../context.js";
 
@@ -69,7 +69,7 @@ export const serviceTools: Tool[] = [
   {
     name: "deploy_service",
     description:
-      "Dispara o deploy do serviço com a configuração atual. Usa o source configurado (GitHub, image, dockerfile).",
+      "Dispara o deploy do serviço com a configuração atual. Usa o source configurado (GitHub, image, dockerfile). Funciona para serviços app E compose — detecta o tipo e roteia para o namespace certo (não precisa saber de antemão se é compose).",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,7 +81,7 @@ export const serviceTools: Tool[] = [
   },
   {
     name: "start_service",
-    description: "Inicia um serviço que está parado.",
+    description: "Inicia um serviço que está parado. Funciona para app e compose (em compose, equivale a um redeploy/compose up).",
     inputSchema: {
       type: "object",
       properties: {
@@ -109,7 +109,7 @@ export const serviceTools: Tool[] = [
   },
   {
     name: "restart_service",
-    description: "Reinicia o serviço. Causa breve indisponibilidade.",
+    description: "Reinicia o serviço. Causa breve indisponibilidade. Funciona para app E compose — em compose, reinicia via redeploy (docker compose up recria os containers).",
     inputSchema: {
       type: "object",
       properties: {
@@ -170,9 +170,109 @@ export const serviceTools: Tool[] = [
       required: ["projectName", "serviceName", "notes"],
     },
   },
+  {
+    name: "set_service_resources",
+    description:
+      "Define limites e reservas de CPU e memória do serviço. Envie só os campos que quer alterar — os omitidos mantêm o valor atual (0 = sem limite). Memória em MB, CPU em núcleos (0.5 = meio núcleo). Aplica no próximo deploy/restart.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectName: { type: "string", description: "Nome do projeto" },
+        serviceName: { type: "string", description: "Nome do serviço" },
+        memoryLimit: { type: "number", description: "Limite de memória em MB (hard cap)" },
+        memoryReservation: { type: "number", description: "Reserva de memória em MB (soft)" },
+        cpuLimit: { type: "number", description: "Limite de CPU (1 = 1 núcleo)" },
+        cpuReservation: { type: "number", description: "Reserva de CPU (1 = 1 núcleo)" },
+      },
+      required: ["projectName", "serviceName"],
+    },
+  },
 ];
 
 type Args = Record<string, unknown>;
+
+export const SERVICE_TYPES = ["app", "compose", "postgres", "mysql", "mariadb", "mongo", "redis"] as const;
+export type ServiceType = (typeof SERVICE_TYPES)[number];
+
+/**
+ * Extrai o tipo de um serviço a partir da resposta de
+ * `projects.listProjectsAndServices`. Função PURA (sem rede) — separada de
+ * `resolveServiceType` para ser testável de forma determinística.
+ *
+ * @remarks Forma confirmada ao vivo (Easypanel v2.30.1):
+ *   `{ projects: [...], services: [{ projectName, name, type, ... }] }`,
+ *   onde `type` ∈ app|compose|postgres|mysql|mariadb|mongo|redis. O parsing aceita
+ *   também formas alternativas (aninhada/agrupada por tipo) para resistir a
+ *   mudanças entre versões.
+ */
+export function extractServiceType(
+  data: unknown,
+  projectName: string,
+  serviceName: string
+): ServiceType | null {
+  const d = data as any;
+  const isType = (t: unknown): t is ServiceType =>
+    typeof t === "string" && (SERVICE_TYPES as readonly string[]).includes(t);
+
+  // Coleta entradas de serviço de várias formas conhecidas:
+  //   { services: [{ type, name, projectName }] }            ← forma confirmada
+  //   { projects: [{ name, services: [{ type, name }] }] }
+  //   { app: [...], compose: [...], postgres: [...] }          (agrupado por tipo)
+  const candidates: Array<{ type?: unknown; name?: unknown; project?: unknown }> = [];
+
+  if (Array.isArray(d?.services)) {
+    for (const s of d.services) {
+      candidates.push({ type: s?.type, name: s?.name ?? s?.serviceName, project: s?.projectName ?? s?.project });
+    }
+  }
+  if (Array.isArray(d?.projects)) {
+    for (const p of d.projects) {
+      const proj = p?.name ?? p?.projectName;
+      if (Array.isArray(p?.services)) {
+        for (const s of p.services) {
+          candidates.push({ type: s?.type, name: s?.name ?? s?.serviceName, project: proj });
+        }
+      }
+    }
+  }
+  for (const t of SERVICE_TYPES) {
+    if (Array.isArray(d?.[t])) {
+      for (const s of d[t]) {
+        candidates.push({ type: t, name: s?.name ?? s?.serviceName, project: s?.projectName ?? s?.project });
+      }
+    }
+  }
+
+  for (const c of candidates) {
+    const matchesProject = c.project === undefined || c.project === projectName;
+    if (c.name === serviceName && matchesProject && isType(c.type)) return c.type;
+  }
+  return null;
+}
+
+/**
+ * Descobre o tipo de um serviço consultando `projects.listProjectsAndServices`.
+ *
+ * Necessário porque as procedures de ciclo de vida (deploy/start/stop/restart)
+ * vivem em namespaces diferentes por tipo — `services.app.*` vs `services.compose.*`.
+ * Chamar o namespace errado retorna 404/500 (foi o que quebrou o redeploy de um
+ * serviço compose: o agente chamava `deploy_service`, que só fala com `services.app.*`).
+ *
+ * Retorna `null` se não conseguir determinar — nesse caso o chamador mantém o
+ * comportamento padrão (`app`), preservando a compatibilidade.
+ */
+async function resolveServiceType(
+  client: ReturnType<typeof getClient>,
+  projectName: string,
+  serviceName: string
+): Promise<ServiceType | null> {
+  try {
+    const data = await client.query<unknown>("projects.listProjectsAndServices");
+    return extractServiceType(data, projectName, serviceName);
+  } catch {
+    return null; // detecção é best-effort; falha → chamador usa o default
+  }
+}
 
 export async function handleServiceTool(name: string, args: Args) {
   const client = getClient();
@@ -248,7 +348,11 @@ export async function handleServiceTool(name: string, args: Args) {
   }
 
   if (name === "deploy_service") {
-    const result = await client.mutate("services.app.deployService", { projectName, serviceName });
+    // Compose vive em outro namespace: services.app.deployService dá 404/500 num
+    // serviço compose. Detecta o tipo e roteia para services.compose.deployService.
+    const type = await resolveServiceType(client, projectName, serviceName);
+    const procedure = type === "compose" ? "services.compose.deployService" : "services.app.deployService";
+    const result = await client.mutate(procedure, { projectName, serviceName });
     return {
       content: [
         {
@@ -257,6 +361,7 @@ export async function handleServiceTool(name: string, args: Args) {
             status: "deploy_iniciado",
             projectName,
             serviceName,
+            tipo: type ?? "app (assumido — tipo não detectado)",
             resultado: result,
             dica: "Use list_actions para acompanhar o progresso do deploy",
           }),
@@ -266,6 +371,27 @@ export async function handleServiceTool(name: string, args: Args) {
   }
 
   if (name === "start_service") {
+    const type = await resolveServiceType(client, projectName, serviceName);
+    if (type === "compose") {
+      // services.compose não tem startService confirmado. Subir um stack parado =
+      // redeploy (docker compose up). Roteamos para a procedure confirmada.
+      const result = await client.mutate("services.compose.deployService", { projectName, serviceName });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              status: "iniciado",
+              tipo: "compose",
+              via: "services.compose.deployService (compose up)",
+              projectName,
+              serviceName,
+              resultado: result,
+            }),
+          },
+        ],
+      };
+    }
     await client.mutate("services.app.startService", { projectName, serviceName });
     return { content: [{ type: "text" as const, text: ok(ctx, { status: "iniciado", projectName, serviceName }) }] };
   }
@@ -278,11 +404,55 @@ export async function handleServiceTool(name: string, args: Args) {
       `serviço "${serviceName}" (usuários perderão acesso)`
     );
     if (blocked) return { content: [{ type: "text" as const, text: ctx + blocked }] };
+    const type = await resolveServiceType(client, projectName, serviceName);
+    if (type === "compose") {
+      // services.compose não tem stopService confirmado e parar ≠ redeploy (não há
+      // procedure de leitura segura que mapeie 1:1). Em vez de disparar uma mutation
+      // no escuro, devolvemos orientação acionável — melhor que um 404 opaco.
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              status: "nao_suportado",
+              tipo: "compose",
+              motivo:
+                "Parar um serviço compose não tem procedure tRPC confirmada neste MCP. " +
+                "Use o botão 'Stop' do serviço no painel do Easypanel, ou trpc_raw após confirmar a procedure correta.",
+              alternativa: "Para recriar/atualizar os containers, use deploy_service ou restart_service (ambos roteiam para compose deploy).",
+            }),
+          },
+        ],
+      };
+    }
     await client.mutate("services.app.stopService", { projectName, serviceName });
     return { content: [{ type: "text" as const, text: ok(ctx, { status: "parado", projectName, serviceName }) }] };
   }
 
   if (name === "restart_service") {
+    const type = await resolveServiceType(client, projectName, serviceName);
+    if (type === "compose") {
+      // services.compose não tem restartService confirmado. Para compose, "restart"
+      // = redeploy (docker compose up recria os containers) — exatamente o que faz a
+      // procedure confirmada services.compose.deployService.
+      const result = await client.mutate("services.compose.deployService", { projectName, serviceName });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              status: "reiniciado",
+              tipo: "compose",
+              via: "services.compose.deployService (redeploy = restart em compose)",
+              projectName,
+              serviceName,
+              resultado: result,
+              dica: "Use list_actions para acompanhar o progresso.",
+            }),
+          },
+        ],
+      };
+    }
     await client.mutate("services.app.restartService", { projectName, serviceName });
     return { content: [{ type: "text" as const, text: ok(ctx, { status: "reiniciado", projectName, serviceName }) }] };
   }
@@ -306,6 +476,73 @@ export async function handleServiceTool(name: string, args: Args) {
     const { notes } = args as { notes: string };
     await client.mutate("services.common.setNotes", { projectName, serviceName, notes });
     return { content: [{ type: "text" as const, text: ok(ctx, { status: "notas_salvas", projectName, serviceName }) }] };
+  }
+
+  if (name === "set_service_resources") {
+    const { memoryLimit, memoryReservation, cpuLimit, cpuReservation } = args as {
+      memoryLimit?: number;
+      memoryReservation?: number;
+      cpuLimit?: number;
+      cpuReservation?: number;
+    };
+    // Valida cada campo informado: o SDK não valida inputSchema em runtime, então
+    // garantimos número finito e positivo antes de mandar à API.
+    const assertPositive = (v: unknown, field: string) => {
+      if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v <= 0)) {
+        throw new McpError(ErrorCode.InvalidParams, `${field} inválido. Use um número positivo.`);
+      }
+    };
+    assertPositive(memoryLimit, "memoryLimit");
+    assertPositive(memoryReservation, "memoryReservation");
+    assertPositive(cpuLimit, "cpuLimit");
+    assertPositive(cpuReservation, "cpuReservation");
+
+    if (
+      memoryLimit === undefined &&
+      memoryReservation === undefined &&
+      cpuLimit === undefined &&
+      cpuReservation === undefined
+    ) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: ok(ctx, {
+              erro: "Informe ao menos um limite/reserva (memoryLimit, memoryReservation, cpuLimit ou cpuReservation).",
+            }),
+          },
+        ],
+      };
+    }
+
+    // A API exige o objeto `resources` COMPLETO (os 4 campos, descoberto em teste
+    // real) — um update parcial sem os outros campos é rejeitado. Para preservar a
+    // UX de "altere só o que quiser", lemos os valores atuais e mesclamos por cima.
+    // 0 = sem limite/reserva no Easypanel (default quando nunca foi configurado).
+    const current = await client.query<{ resources?: Record<string, number> | null }>(
+      "services.app.inspectService",
+      { projectName, serviceName }
+    );
+    const base = current?.resources ?? {};
+    const resources = {
+      memoryReservation: memoryReservation ?? base.memoryReservation ?? 0,
+      memoryLimit: memoryLimit ?? base.memoryLimit ?? 0,
+      cpuReservation: cpuReservation ?? base.cpuReservation ?? 0,
+      cpuLimit: cpuLimit ?? base.cpuLimit ?? 0,
+    };
+    await client.mutate("services.app.updateResources", { projectName, serviceName, resources });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: ok(ctx, {
+            status: "recursos_atualizados",
+            aplicado: resources,
+            dica: "Faça deploy_service ou restart_service para aplicar.",
+          }),
+        },
+      ],
+    };
   }
 
   throw new Error(`Tool desconhecida: ${name}`);

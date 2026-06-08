@@ -1,22 +1,50 @@
-# Test Report — easypanel-mcp-server v1.1.0
+# Test Report — easypanel-mcp-server v1.3.0
 
-**Data:** 2026-06-05
+**Data:** 2026-06-08
 **Ambiente:** Node v24 · Windows 11
 **Servidor:** `node dist/index.js` (stdio)
-**Painel de teste:** instância Easypanel real (v2.30.1), projeto `aplicativos`, serviço `hermes`
+**Painel de teste:** instância Easypanel real (v2.30.1), projeto `aplicativos`
 
 ## Metodologia
 
-Validação ponta-a-ponta: handlers compilados chamados contra a API tRPC/WebSocket de um painel Easypanel real, mais smoke test JSON-RPC via stdio (`initialize` → `tools/list` → `tools/call`). As tools **mutáveis/destrutivas** não foram executadas contra o painel de produção por design — foram validadas por revisão de código e pela confirmação dos procedures tRPC subjacentes (mesmos padrões das tools de leitura testadas).
+Três camadas: (1) **suíte automatizada** de testes unitários das funções puras de
+segurança e roteamento (`npm test`, sem rede); (2) **validação ponta-a-ponta** dos
+handlers contra a API tRPC/WebSocket de um painel Easypanel real; (3) revisão de
+código das mutações destrutivas (não executadas contra produção por design, exceto o
+redeploy de compose abaixo, autorizado pelo usuário).
+
+## Suíte automatizada (`npm test` — 23 testes, 0 falhas)
+
+Testes unitários determinísticos (Node `node:test` via `tsx`), sem tocar a rede:
+
+| Área | Cobertura |
+|------|-----------|
+| `assertValidName` | aceita nomes válidos; rejeita maiúsculas, espaços, `/`, `..`, `.`, `;`, não-ascii, não-string |
+| `looksDestructiveCommand` | detecta rm -rf/dd/mkfs/shutdown/kill/fork bomb/pipe-para-shell; deixa passar leitura |
+| `guardDestructive` | libera só com `CONFIRMO` exato; bloqueia variações |
+| `isReadOnly` | reflete `MCP_ACCESS_MODE` (case-insensitive) |
+| `extractServiceType` | roteamento app/compose/db nas 3 formas de resposta; null p/ tipo/projeto/dados inválidos |
+| env vars | `parseEnvString`/`serializeEnvVars` roundtrip; escape de newline (anti-injeção); `maskSensitiveValues`; `validateKeyValue` |
+| `isValidProcedureName` | aceita `namespace.procedure`; rejeita barra/query/traversal/sem-ponto/não-string |
+| registry | 57 tools, nomes únicos, inputSchema object, tools destrutivas declaram `confirm`, dispatcher rejeita tool desconhecida |
 
 ## Infra
 
 | Item | Status |
 |------|--------|
-| `tools/list` retorna 41 tools | ✅ |
+| `tools/list` retorna 57 tools | ✅ |
 | `tools/call` end-to-end via stdio | ✅ |
 | Build `tsc` | ✅ |
+| `npm test` (23 testes) | ✅ 0 falhas |
 | `npm audit` | ✅ 0 vulnerabilidades |
+
+## Roteamento Compose validado ao vivo (v1.3.0)
+
+| Verificação | Status | Observações |
+|------|--------|-------------|
+| Forma de `listProjectsAndServices` | ✅ | `{ projects, services:[{projectName,name,type}] }`; `aplicativos/strat-vexa` = `compose` |
+| `deploy_service` roteia compose → `services.compose.deployService` | ✅ | HTTP 200, action `status=done` |
+| Stack `strat-vexa` saudável pós-deploy | ✅ | `vexa-api`/`vexa-dashboard`/`vexa-db` todos `running` (api e db `healthy`) |
 
 ## Tools verificadas ao vivo (executadas contra o painel real)
 
@@ -52,11 +80,12 @@ Operações que criam, alteram ou removem recursos — não executadas para não
 
 ## Resumo
 
-- **Total:** 41 tools
-- **Verificadas ao vivo:** 11 (todas as de leitura/diagnóstico, incluindo as 4 novas e as 3 corrigidas nesta release)
-- **Validadas por revisão:** 30 (mutáveis/destrutivas — não executadas contra produção por design)
+- **Total:** 57 tools + `trpc_raw`
+- **Suíte automatizada:** ✅ 23/23 (funções puras de segurança e roteamento, sem rede)
+- **Verificadas ao vivo:** tools de leitura/diagnóstico + roteamento compose (`deploy_service` → compose, redeploy real do `strat-vexa`)
+- **Validadas por revisão:** mutáveis/destrutivas curadas (não executadas contra produção por design, exceto o redeploy autorizado)
 - **Erros:** 0
-- **Infra (load + roteamento + stdio):** ✅ 41/41
+- **Infra (load + roteamento + stdio):** ✅ 57/57
 
 ## Observações
 
