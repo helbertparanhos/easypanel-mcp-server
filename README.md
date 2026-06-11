@@ -7,12 +7,14 @@
 [![GitHub Stars](https://img.shields.io/github/stars/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/network/members)
 [![GitHub Issues](https://img.shields.io/github/issues/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/issues)
+[![Glama Quality](https://glama.ai/mcp/servers/helbertparanhos/easypanel-mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/helbertparanhos/easypanel-mcp-server)
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-000000?style=flat-square)](https://modelcontextprotocol.io/)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-D97706?style=flat-square)](https://claude.ai/code)
 [![Cursor](https://img.shields.io/badge/Cursor-Compatible-4F46E5?style=flat-square)](https://cursor.sh)
+[![Claude Desktop](https://img.shields.io/badge/Claude%20Desktop-Compatible-D97706?style=flat-square)](https://claude.ai/download)
 
 [![Instagram](https://img.shields.io/badge/@helbertparanhos-E4405F?style=flat-square&logo=instagram&logoColor=white)](https://www.instagram.com/helbertparanhos)
 [![YouTube](https://img.shields.io/badge/stratacademy-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://www.youtube.com/@stratacademy)
