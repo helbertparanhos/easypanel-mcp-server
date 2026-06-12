@@ -3,10 +3,12 @@ import { getClient } from "../client.js";
 import { guardDestructive, CONFIRM_KEYWORD } from "../context.js";
 
 /**
- * Escape hatch genérico: chama qualquer procedure tRPC do Easypanel que não tenha
- * uma tool curada dedicada. O Easypanel expõe ~347 procedures em 43 namespaces;
+ * Escape hatch genérico: chama qualquer procedure da API do Easypanel que não tenha
+ * uma tool curada dedicada. O Easypanel expõe ~350 procedures em 40+ namespaces;
  * cobrir todas com tools tipadas seria inviável, então este atalho dá acesso ao
  * restante (ex.: traefik.*, branding.*, cloudflareTunnel.*, box.*, backups.*).
+ * O nome segue em notação de pontos ("namespace.procedure") nas duas gerações da
+ * API — o client traduz para o caminho certo (tRPC ≤ 2.30 ou /api/rpc/ em 2.31+).
  *
  * Diferenças de segurança vs. o trpc_raw "cru" de outros MCPs:
  *  - O nome da procedure é validado (namespace.procedure) antes de ir para a URL.
@@ -54,7 +56,7 @@ export const rawTools: Tool[] = [
         isMutation: {
           type: "boolean",
           description:
-            "true para operações de escrita (POST), false para leitura (GET, padrão). Mutations exigem confirm.",
+            "true para operações de escrita, false para leitura (padrão). Mutations exigem confirm. Em painéis 2.31+ o client valida contra o OpenAPI do painel e recusa mutations chamadas como leitura.",
           default: false,
         },
         confirm: {
@@ -106,8 +108,9 @@ export async function handleRawTool(name: string, args: Args) {
     );
   }
 
-  // Em reads o input é serializado para a query string da URL. Limitamos o tamanho
-  // para evitar estourar limites de URL do servidor (e DoS leve com payloads enormes).
+  // Em painéis ≤ 2.30 o input de reads vai serializado na query string da URL —
+  // limitamos o tamanho para não estourar limites de URL (e DoS leve com payloads
+  // enormes). Em 2.31+ vai no body, mas o teto continua valendo como sanidade.
   if (input !== undefined) {
     let serializedLen: number;
     try {
@@ -133,6 +136,9 @@ export async function handleRawTool(name: string, args: Args) {
     return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   }
 
-  const result = await client.query(procedure, input);
+  // requireDocumentedQuery: em painéis 2.31+ (onde tudo é POST), a leitura
+  // arbitrária só prossegue se o OpenAPI do painel classificar a procedure como
+  // query — fail-closed contra mutation disfarçada de leitura.
+  const result = await client.query(procedure, input, { requireDocumentedQuery: true });
   return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
 }

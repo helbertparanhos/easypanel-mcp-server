@@ -1,23 +1,60 @@
-# Referência da API tRPC do Easypanel
+# Referência da API do Easypanel (tRPC ≤ 2.30 / RPC ≥ 2.31)
 
-Documentação da API interna que este MCP consome. O Easypanel não publica uma API
-REST oficial — o painel conversa com o backend via **tRPC sobre HTTP**, e este MCP
-usa os mesmos endpoints. Esta referência existe para que adicionar/auditar uma tool
-não dependa de engenharia reversa repetida.
+Documentação da API interna que este MCP consome. Esta referência existe para que
+adicionar/auditar uma tool não dependa de engenharia reversa repetida.
 
-> ⚠️ É uma API **interna e não versionada**. Procedures podem mudar entre versões do
-> Easypanel. As confirmadas abaixo foram validadas em uso real; o resto deve ser tratado
-> como "provável" e verificado antes de depender em produção.
+> ⚠️ É uma API **interna e não versionada** (a partir do 2.31 há OpenAPI publicado,
+> mas auto-gerado e sem garantia de estabilidade). Procedures podem mudar entre
+> versões do Easypanel. As confirmadas abaixo foram validadas em uso real; o resto
+> deve ser tratado como "provável" e verificado antes de depender em produção.
 
 ---
 
-## Arquitetura
+## As duas gerações da API
+
+O **Easypanel 2.31** (jun/2026) substituiu o tRPC interno por uma camada RPC nova
+(estilo [oRPC](https://orpc.dev)). Os **nomes das procedures e os inputs não
+mudaram** — mudaram o transporte e a forma da resposta:
+
+| | **≤ 2.30 (tRPC)** | **≥ 2.31 (RPC novo)** |
+|---|---|---|
+| Base | `/api/trpc/<ns>.<proc>` | `/api/rpc/<ns>/<proc>` (o caminho antigo ainda responde) |
+| Query (leitura) | `GET ?input={"json":<params>}` (url-encoded) | **`POST` body `{"json": <params>}`** ¹ |
+| Mutation (escrita) | `POST` body `{"json": <params>}` | `POST` body `{"json": <params>}` |
+| Resposta (sucesso) | `{"result":{"data":{"json":<dado>}}}` | `{"json": <dado>}` |
+| Resposta (erro) | `{"error":{"json":{"message":...}}}` | HTTP ≠ 200 + `{"json":{"code":"BAD_REQUEST","status":400,"message":...}}` |
+| Documentação | nenhuma (engenharia reversa) | **OpenAPI em `GET /api/openapi.json`** (~373 endpoints, 48 namespaces) |
+| WebSockets `/ws/*` | iguais | **iguais** (sem mudança) |
+
+¹ O OpenAPI documenta queries como `GET` com query params, mas na prática (2.31.0)
+o GET com parâmetros responde `400 Input validation failed` — o caminho confiável,
+validado ao vivo, é `POST {"json": ...}` para **qualquer** procedure.
+
+**Consequência de segurança:** no 2.31+ o método HTTP deixou de separar leitura de
+escrita (tudo é POST). Por isso o [`client.ts`](../src/client.ts) baixa o
+`/api/openapi.json` do próprio painel e monta um mapa procedure → método documentado:
+`query()` **recusa** procedures documentadas como mutation, preservando o contrato do
+`MCP_ACCESS_MODE=readonly` e o gate de `CONFIRMO` do `trpc_raw` (que no tRPC legado
+era garantido pelo próprio método HTTP). Para procedures **arbitrárias** (`trpc_raw`)
+o guard é **fail-closed**: spec indisponível ou procedure fora do spec → leitura
+recusada. O lookup é normalizado em minúsculas (sem bypass por variação de caixa).
+
+### Auto-detecção no client
+
+O client detecta a geração com 1 request (`update.getStatus`, query sem input que
+existe nas duas) e cacheia o resultado: corpo com `result`/`error` → tRPC legado;
+corpo com `json` no topo → RPC 2.31+. Dá para forçar com
+`EASYPANEL_API_FLAVOR=trpc|rpc` (aliases: `legacy`|`modern`).
+
+---
+
+## Arquitetura (geração tRPC, ≤ 2.30)
 
 - **Protocolo:** tRPC sobre HTTP (serialização superjson).
 - **Base URL:** `${EASYPANEL_URL}/api/trpc/`
 - **Auth:** header `Authorization: Bearer <EASYPANEL_TOKEN>`
   (Settings → API → Generate Token). Os endpoints WebSocket `/ws/*` são a exceção:
-  exigem o token na query string `?token=...`.
+  exigem o token na query string `?token=...`. **A auth é igual nas duas gerações.**
 - **Queries (leitura):** `GET /api/trpc/<router>.<procedure>?input=<json-url-encoded>`
 - **Mutations (escrita):** `POST /api/trpc/<router>.<procedure>` com corpo `{"json": {...}}`
 
@@ -40,8 +77,9 @@ POST /api/trpc/services.app.deployService     body: {"json":{"projectName":"meu-
   "data": { "code": "UNAUTHORIZED", "httpStatus": 401, "path": "...", "zodErrors": null } } } }
 ```
 
-O [`client.ts`](../src/client.ts) já desembrulha `result.data.json` e trata os erros —
-nunca vaza o corpo cru no contexto do LLM (loga em stderr).
+O [`client.ts`](../src/client.ts) desembrulha as **duas** formas de resposta
+(`result.data.json` no legado, `json` no 2.31+) e trata os erros — nunca vaza o
+corpo cru no contexto do LLM (loga em stderr).
 
 ---
 
@@ -209,7 +247,11 @@ procedure diretamente:
 
 Mutations via `trpc_raw` pulam os guards das tools curadas, então a confirmação
 explícita é a rede de segurança mínima. Em `MCP_ACCESS_MODE=readonly`, qualquer
-mutation (curada ou raw) é bloqueada no client.
+mutation (curada ou raw) é bloqueada no client. Em painéis 2.31+ — onde todo o
+transporte é POST — o client valida a procedure contra o OpenAPI do painel de
+forma **fail-closed**: leituras via `trpc_raw` só executam se a procedure estiver
+documentada como query (spec indisponível ou procedure desconhecida → recusada),
+então não dá para executar escrita "disfarçada" de leitura.
 
 > ⚠️ **Reads via `trpc_raw` não são protegidos pelo readonly** e podem retornar
 > dados sensíveis (ex.: `services.app.inspectService` devolve env vars com secrets de
@@ -236,12 +278,15 @@ de uma vez. Default: `full`.
 
 ## Como descobrir novas procedures
 
-1. **Inspecionar o tráfego do painel:** abra o DevTools (aba Network), execute a
-   ação desejada na UI do Easypanel e observe a chamada `POST`/`GET` para
-   `/api/trpc/<router>.<procedure>` — o nome e o payload aparecem ali.
-2. **Bundle do frontend:** os nomes das procedures estão no JS do painel; um
+1. **OpenAPI do painel (2.31+):** `GET /api/openapi.json` (com o Bearer token)
+   devolve o spec completo — ~373 endpoints com schemas de input. É a fonte
+   primária a partir do 2.31; `GET` = query, só-`POST` = mutation.
+2. **Inspecionar o tráfego do painel:** abra o DevTools (aba Network), execute a
+   ação desejada na UI do Easypanel e observe a chamada para
+   `/api/trpc/...` ou `/api/rpc/...` — o nome e o payload aparecem ali.
+3. **Bundle do frontend:** os nomes das procedures estão no JS do painel; um
    `grep` por `.<namespace>.` no bundle revela as procedures de um router.
-3. **Testar com `trpc_raw`:** comece sempre com `isMutation:false` (leitura) para
+4. **Testar com `trpc_raw`:** comece sempre com `isMutation:false` (leitura) para
    inspecionar o shape de retorno antes de tentar uma escrita.
 
 Ao confirmar uma nova procedure, adicione-a à tabela acima e — se for de uso comum —

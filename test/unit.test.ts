@@ -27,6 +27,13 @@ import {
   validateKeyValue,
 } from "../src/tools/env.js";
 import { isValidProcedureName } from "../src/tools/raw.js";
+import {
+  flavorFromEnv,
+  flavorFromBody,
+  rpcPath,
+  unwrapBody,
+  safeServerMessage,
+} from "../src/client.js";
 
 // ---------------------------------------------------------------------------
 // assertValidName — barreira contra confusão de alvo / injeção em URL e WS query
@@ -245,4 +252,71 @@ test("isValidProcedureName rejeita nomes perigosos", () => {
   ]) {
     assert.equal(isValidProcedureName(bad as unknown), false, `deveria rejeitar: ${String(bad)}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// client.ts — dual-flavor (tRPC ≤2.30 vs RPC 2.31+): detecção, path e unwrap
+// ---------------------------------------------------------------------------
+test("flavorFromEnv mapeia overrides e ignora valores desconhecidos", () => {
+  const prev = process.env.EASYPANEL_API_FLAVOR;
+  try {
+    for (const [v, expected] of [
+      ["trpc", "trpc"],
+      ["legacy", "trpc"],
+      ["RPC", "rpc"],
+      ["modern", "rpc"],
+    ] as const) {
+      process.env.EASYPANEL_API_FLAVOR = v;
+      assert.equal(flavorFromEnv(), expected, `EASYPANEL_API_FLAVOR=${v}`);
+    }
+    process.env.EASYPANEL_API_FLAVOR = "auto";
+    assert.equal(flavorFromEnv(), null, "valor desconhecido cai na auto-detecção");
+    delete process.env.EASYPANEL_API_FLAVOR;
+    assert.equal(flavorFromEnv(), null);
+  } finally {
+    if (prev === undefined) delete process.env.EASYPANEL_API_FLAVOR;
+    else process.env.EASYPANEL_API_FLAVOR = prev;
+  }
+});
+
+test("flavorFromBody identifica a geração pela forma da resposta", () => {
+  // tRPC ≤ 2.30: sucesso e erro
+  assert.equal(flavorFromBody({ result: { data: { json: { ok: 1 } } } }), "trpc");
+  assert.equal(flavorFromBody({ error: { json: { message: "UNAUTHORIZED" } } }), "trpc");
+  // RPC 2.31+: sucesso e erro vêm ambos como { json: ... }
+  assert.equal(flavorFromBody({ json: { version: "2.31.0" } }), "rpc");
+  assert.equal(flavorFromBody({ json: { code: "BAD_REQUEST", status: 400 } }), "rpc");
+  // formas irreconhecíveis
+  assert.equal(flavorFromBody({ foo: 1 }), null);
+  assert.equal(flavorFromBody("html da SPA"), null);
+  assert.equal(flavorFromBody(null), null);
+});
+
+test("rpcPath converte notação de pontos para o caminho /api/rpc", () => {
+  assert.equal(rpcPath("projects.inspectProject"), "/api/rpc/projects/inspectProject");
+  assert.equal(rpcPath("services.app.deployService"), "/api/rpc/services/app/deployService");
+});
+
+test("unwrapBody desembrulha as duas formas (e preserva null/array)", () => {
+  // tRPC legado
+  assert.deepEqual(unwrapBody({ result: { data: { json: { a: 1 } } } }), { a: 1 });
+  // comportamento legado preservado do v1: json null cai no ?? e devolve o nível acima
+  assert.deepEqual(unwrapBody({ result: { data: { json: null } } }), { json: null });
+  // RPC 2.31+
+  assert.deepEqual(unwrapBody({ json: { a: 1 } }), { a: 1 });
+  assert.deepEqual(unwrapBody({ json: [1, 2] }), [1, 2], "arrays no topo (ex. listActions)");
+  assert.equal(unwrapBody({ json: null }), null);
+  // sem embrulho conhecido — retorna como veio
+  assert.deepEqual(unwrapBody({ livre: true }), { livre: true });
+});
+
+test("safeServerMessage colapsa whitespace, trunca e rejeita não-string", () => {
+  assert.equal(safeServerMessage("Service not found."), "Service not found.");
+  assert.equal(safeServerMessage("linha1\n\n  linha2\tx"), "linha1 linha2 x", "newlines/tabs colapsados");
+  const longo = safeServerMessage("a".repeat(500));
+  assert.equal(longo?.length, 301, "trunca em 300 + reticência");
+  assert.ok(longo?.endsWith("…"));
+  assert.equal(safeServerMessage("   "), null, "só whitespace vira null");
+  assert.equal(safeServerMessage(undefined), null);
+  assert.equal(safeServerMessage({ message: "obj" }), null, "não-string vira null");
 });

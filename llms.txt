@@ -2,7 +2,7 @@
 
 > MCP Server for full Easypanel control via Claude Code, Cursor and Claude Desktop.
 
-easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read runtime logs, exec commands inside containers, manage domains, databases, volumes and ports, set resource limits, run Docker maintenance, and monitor infrastructure directly from Claude Code or Cursor — plus a `trpc_raw` escape hatch reaching any of Easypanel's ~347 tRPC procedures.
+easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read runtime logs, exec commands inside containers, manage domains, databases, volumes and ports, set resource limits, run Docker maintenance, and monitor infrastructure directly from Claude Code or Cursor — plus a `trpc_raw` escape hatch reaching any of Easypanel's ~350 procedures. v2.x speaks both Easypanel API generations (tRPC on panels ≤ 2.30 and the new RPC layer of 2.31+) with automatic detection.
 
 ## Available tools (57)
 
@@ -62,7 +62,7 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `list_nodes`: List Docker Swarm cluster nodes (local node only on single-server setups)
 - `restart_panel`: Restart Easypanel itself — requires confirm: "CONFIRMO"
 - `reboot_server`: Reboot the entire host server — requires confirm: "CONFIRMO"
-- `trpc_raw`: Call any Easypanel tRPC procedure directly (~347 across 43 namespaces). Reads by default; writes require isMutation: true and confirm: "CONFIRMO"
+- `trpc_raw`: Call any Easypanel API procedure directly (~350 across 40+ namespaces, dot notation on both API generations). Reads by default; writes require isMutation: true and confirm: "CONFIRMO"
 
 ## Quick start
 
@@ -89,6 +89,7 @@ Add to your `.mcp.json` or `.cursor/mcp.json`:
 - `EASYPANEL_TOKEN` (required): API token — generate at Easypanel → Settings → API → Generate Token
 - `MCP_ACCESS_MODE` (optional): set to `readonly` to block all writes (curated tools and trpc_raw); reads stay available
 - `EASYPANEL_RAW_DISABLED` (optional): set to `1` to disable the trpc_raw escape hatch entirely
+- `EASYPANEL_API_FLAVOR` (optional): force the panel API generation instead of auto-detecting — `trpc` (Easypanel ≤ 2.30) or `rpc` (≥ 2.31)
 
 ## Safety features
 

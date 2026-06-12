@@ -2,22 +2,23 @@
   "name": "easypanel-mcp-server",
   "title": "Easypanel MCP",
   "type": "mcp-server",
-  "description": "MCP TypeScript com 57 tools + acesso tRPC raw para controle total do Easypanel via Claude.",
+  "description": "MCP TypeScript com 57 tools + acesso raw à API para controle total do Easypanel via Claude. Fala as duas gerações da API (tRPC ≤2.30 e RPC 2.31+) com auto-detecção.",
   "status": "stable",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "visibility": "public",
   "install": "npx -y easypanel-mcp-server",
   "homepage": "https://www.npmjs.com/package/easypanel-mcp-server",
   "language": "typescript",
   "features": [
     "57 tools cobrindo projetos, serviços, deploys, env vars, logs, bancos, volumes, portas e compose",
+    "Suporte às duas gerações da API do Easypanel (tRPC ≤2.30 e RPC 2.31+) com auto-detecção",
     "trpc_raw para chamadas arbitrárias à API do Easypanel",
-    "Modo readonly para operação segura",
+    "Modo readonly para operação segura (com guard query-vs-mutation via OpenAPI no 2.31+)",
     "GitHub auto-deploy",
     "Manutenção do servidor (stats, prune, reboot)"
   ],
   "depends_on": [],
   "tags": ["mcp", "easypanel", "deploy", "devops", "docker"],
   "owner": "Helbert Paranhos / Strat Academy",
-  "updated": "2026-06-08"
+  "updated": "2026-06-12"
 }

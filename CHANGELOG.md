@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.0] - 2026-06-12
+
+### ⚠️ Breaking / Compatibilidade
+- **Suporte ao Easypanel 2.31+**, que substituiu a API tRPC interna por uma camada RPC nova (estilo oRPC) — a mudança que fazia **toda chamada com parâmetros falhar com `400 Input validation failed`** no v1.x. O client agora fala as **duas gerações** e **auto-detecta** qual o painel usa (1 request `update.getStatus`, cacheado; forçável com `EASYPANEL_API_FLAVOR=trpc|rpc`).
+- Major bump por mudança de transporte/parse no client. A superfície das tools (nomes, parâmetros, 57 tools) **não mudou** — para o agente, nada muda.
+- Painéis ≤ 2.30 continuam suportados pelo v2.x (caminho legado preservado byte-a-byte e coberto por testes; não re-validado contra um painel ≤ 2.30 ao vivo). A linha v1.3.x permanece no npm sob a dist-tag `legacy`.
+
+### Added
+- **Modo RPC (Easypanel ≥ 2.31):** todas as chamadas vão por `POST {"json": input}` para `/api/rpc/<ns>/<proc>` (validado ao vivo contra Easypanel 2.31.0 — o `GET` com query params documentado no OpenAPI do painel responde 400 na prática); respostas `{"json": dado}` desembrulhadas; mensagens de erro estruturadas (`message`) agora aparecem no erro da tool (ex.: "Service not found." em vez de um 404 opaco).
+- **`EASYPANEL_API_FLAVOR`** — override manual da geração da API (`trpc`/`legacy` ou `rpc`/`modern`); sem ela, auto-detecção.
+- **Guard query-vs-mutation no modo RPC:** como no 2.31+ tudo é POST, o método HTTP deixou de separar leitura de escrita. O client baixa o **OpenAPI do próprio painel** (`/api/openapi.json`) e recusa procedures documentadas como mutation quando chamadas como leitura (ex.: `trpc_raw` com `isMutation:false`) — preserva o contrato do `MCP_ACCESS_MODE=readonly` e o gate de `CONFIRMO`, que no tRPC legado eram garantidos pelo próprio método HTTP.
+- Funções puras exportadas e testadas: `flavorFromEnv`, `flavorFromBody`, `rpcPath`, `unwrapBody`, `safeServerMessage` (23 → 28 testes).
+
+### Security
+- **Leituras arbitrárias são fail-closed no modo RPC** (endurecido após security review): `trpc_raw` com `isMutation:false` só executa se o OpenAPI do painel classificar a procedure como query. Spec indisponível ou procedure fora do spec → chamada recusada com erro acionável (sem isso, uma falha no fetch do spec permitiria executar mutation "disfarçada" de leitura, contornando readonly e CONFIRMO). Tools curadas não são afetadas (procedures de leitura são literais verificados; para elas o guard é defense-in-depth).
+- Lookup do guard **normalizado em minúsculas** nos dois lados — não contornável por variação de caixa (a regex do `trpc_raw` aceita A-Z).
+- Fetch do OpenAPI **deduplicado em voo e sem cache de falha** — chamadas concorrentes durante o primeiro fetch não rodam sem guard, e uma falha transitória não desativa o guard pela sessão.
+- Mensagens de erro estruturadas do servidor são **colapsadas e truncadas (300 chars)** antes de ir ao contexto do LLM (`safeServerMessage`) — mitiga injeção/inflação de contexto por um painel comprometido. O corpo cru continua indo só para stderr; o token nunca aparece em log ou erro.
+
+### Docs
+- `docs/easypanel-api.md` reescrita com a seção **"As duas gerações da API"** (tabela tRPC vs RPC, formas de resposta, OpenAPI, auto-detecção) e descoberta de procedures via `/api/openapi.json`.
+- README: seção Compatibility (qual versão usar), `EASYPANEL_API_FLAVOR` na tabela de env vars.
+
+### Verificação ao vivo (Easypanel 2.31.0)
+- Query com input (`projects.inspectProject`), query sem input, mutation real (`services.common.setNotes`, gravada e restaurada), guard de mutation-como-leitura (`projects.createProject` via query → recusado) e kill-switch readonly — todos validados contra painel real.
+- WebSockets `/ws/serviceLogs`, `/ws/containerShell`, `/ws/dockerEvents` **não mudaram** no 2.31 (logs validados ao vivo).
+
 ## [1.3.1] - 2026-06-12
 
 ### Docs
