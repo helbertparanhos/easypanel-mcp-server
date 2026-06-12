@@ -36,6 +36,19 @@ It maps the Easypanel tRPC API to **57 typed tools** across 15 categories, plus 
 
 ---
 
+## ⚠️ Compatibility — pick your version
+
+**Easypanel 2.31 replaced its internal tRPC API** with a new RPC layer. On panels ≥ 2.31, every v1.x call that carries parameters fails with `400 Input validation failed`.
+
+| Your Easypanel version | Use |
+|---|---|
+| **≤ 2.30.x** (tRPC API) | `easypanel-mcp-server@legacy` (**v1.3.x** — this line) |
+| **≥ 2.31.0** (new RPC API) | `easypanel-mcp-server@latest` (**v2.x** — auto-detects both generations) |
+
+v2.x auto-detects which API generation your panel speaks, so it also works on ≤ 2.30 — v1.3.x remains published only as a frozen, known-good line for older panels.
+
+---
+
 ## Prerequisites
 
 - Easypanel instance running and accessible

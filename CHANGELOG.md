@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1] - 2026-06-12
+
+### Docs
+- **Marca a linha v1.x como legada (Easypanel ≤ 2.30)**. O Easypanel **2.31** substituiu a API tRPC interna por uma camada RPC nova (`/api/rpc/*`, OpenAPI em `/api/openapi.json`): em painéis ≥ 2.31, qualquer chamada do v1.x **com parâmetros** falha com `400 Input validation failed` (o formato `GET ?input={"json":...}` deixou de ser aceito) e até as respostas de queries sem input mudaram de forma (`{"json":...}` no topo, sem o wrapper `result.data.json`).
+- README ganhou a seção **Compatibility**: painéis ≤ 2.30 → `easypanel-mcp-server@legacy` (v1.3.x); painéis ≥ 2.31 → `@latest` (v2.x, com auto-detecção das duas gerações).
+- Nenhuma mudança de código: release apenas de documentação/sinalização. A linha v1.3.x fica congelada como última versão validada contra Easypanel v2.30.1.
+
 ## [1.3.0] - 2026-06-08
 
 ### Fixed
