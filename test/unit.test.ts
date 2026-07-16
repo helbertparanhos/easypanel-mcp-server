@@ -33,6 +33,8 @@ import {
   rpcPath,
   unwrapBody,
   safeServerMessage,
+  procKindFromName,
+  kindMapFromSpec,
 } from "../src/client.js";
 
 // ---------------------------------------------------------------------------
@@ -319,4 +321,113 @@ test("safeServerMessage colapsa whitespace, trunca e rejeita não-string", () =>
   assert.equal(safeServerMessage("   "), null, "só whitespace vira null");
   assert.equal(safeServerMessage(undefined), null);
   assert.equal(safeServerMessage({ message: "obj" }), null, "não-string vira null");
+});
+
+// ---------------------------------------------------------------------------
+// Classificação leitura/escrita — o guard que segura readonly + CONFIRMO no
+// modo rpc (onde tudo é POST e o método HTTP não separa mais nada).
+// ---------------------------------------------------------------------------
+
+test("procKindFromName classifica pela convenção de nomes (fail-closed)", () => {
+  // leituras — os 6 verbos aceitos
+  for (const p of [
+    "projects.listProjects",
+    "projects.inspectProject",
+    "monitorOld.getSystemStats",
+    "settings.checkForUpdates",
+    "logs.queryServiceLogs",
+    "box.searchTemplates",
+  ]) {
+    assert.equal(procKindFromName(p), "query", p);
+  }
+  // escritas
+  for (const p of [
+    "projects.createProject",
+    "services.app.deployService",
+    "settings.systemPrune",
+    "server.reboot",
+    "services.common.setNotes",
+  ]) {
+    assert.equal(procKindFromName(p), "mutation", p);
+  }
+  // verbo desconhecido → mutation (fail-closed), nunca query
+  assert.equal(procKindFromName("weird.frobnicateThing"), "mutation");
+  assert.equal(procKindFromName(""), "mutation");
+});
+
+test("kindMapFromSpec — spec 2.31 (paths prefixados, GET = query)", () => {
+  const map = kindMapFromSpec({
+    paths: {
+      "/api/rpc/projects/listProjects": { get: {}, post: {} },
+      "/api/rpc/projects/createProject": { post: {} },
+      // fora do namespace rpc — ignorado
+      "/api/health": { get: {} },
+    },
+  });
+  assert.equal(map?.get("projects.listprojects"), "query");
+  assert.equal(map?.get("projects.createproject"), "mutation");
+  assert.equal(map?.has("api.health"), false);
+});
+
+test("kindMapFromSpec — spec 2.32+ (prefixo em servers, tudo POST, sem GET)", () => {
+  const map = kindMapFromSpec({
+    servers: [{ url: "/api/rpc" }],
+    paths: {
+      "/projects/listProjects": { post: { operationId: "projects.listProjects" } },
+      "/projects/createProject": { post: { operationId: "projects.createProject" } },
+      "/services/app/inspectService": { post: { operationId: "services.app.inspectService" } },
+      "/settings/systemPrune": { post: { operationId: "settings.systemPrune" } },
+    },
+  });
+  // sem nenhum GET no spec, a distinção vem da convenção de nomes
+  assert.equal(map?.get("projects.listprojects"), "query");
+  assert.equal(map?.get("services.app.inspectservice"), "query");
+  assert.equal(map?.get("projects.createproject"), "mutation");
+  assert.equal(map?.get("settings.systemprune"), "mutation");
+});
+
+test("kindMapFromSpec — reserva pelo path quando falta operationId", () => {
+  const map = kindMapFromSpec({
+    servers: [{ url: "/api/rpc/" }], // barra final tolerada
+    paths: { "/projects/listProjects": { post: {} } },
+  });
+  assert.equal(map?.get("projects.listprojects"), "query");
+});
+
+test("kindMapFromSpec — specs inúteis viram null (dispara o fail-closed)", () => {
+  assert.equal(kindMapFromSpec(null), null);
+  assert.equal(kindMapFromSpec({}), null);
+  assert.equal(kindMapFromSpec({ paths: {} }), null);
+  // nenhum path reconhecível como procedure rpc
+  assert.equal(kindMapFromSpec({ paths: { "/api/health": { get: {} } } }), null);
+});
+
+test("kindMapFromSpec — todas as leituras das tools curadas sobrevivem no 2.32+", () => {
+  // Se alguma destas virar "mutation", a tool curada correspondente quebra:
+  // query() recusa mutations. Espelha o que o painel 2.32.2 documenta.
+  const curated = [
+    "actions.getAction",
+    "actions.listActions",
+    "certificates.listCertificates",
+    "cluster.listNodes",
+    "domains.listDomains",
+    "monitorOld.getDockerTaskStats",
+    "monitorOld.getStorageStats",
+    "monitorOld.getSystemStats",
+    "mounts.listMounts",
+    "ports.listPorts",
+    "projects.getDockerContainers",
+    "projects.inspectProject",
+    "projects.listProjectsAndServices",
+    "services.app.getExposedPorts",
+    "services.app.inspectService",
+    "services.common.getNotes",
+    "services.common.getServiceError",
+    "services.compose.inspectService",
+    "users.listUsers",
+  ];
+  const paths: Record<string, unknown> = {};
+  for (const p of curated) paths["/" + p.split(".").join("/")] = { post: { operationId: p } };
+  const map = kindMapFromSpec({ servers: [{ url: "/api/rpc" }], paths });
+  for (const p of curated) assert.equal(map?.get(p.toLowerCase()), "query", p);
 });

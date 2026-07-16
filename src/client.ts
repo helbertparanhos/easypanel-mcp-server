@@ -42,6 +42,81 @@ export function rpcPath(procedure: string): string {
   return "/api/rpc/" + procedure.split(".").join("/");
 }
 
+/** Natureza da procedure: leitura (`query`) ou escrita (`mutation`). */
+export type ProcKind = "query" | "mutation";
+
+/**
+ * Verbos iniciais que marcam leitura na convenção de nomes do Easypanel.
+ * Fechado de propósito: qualquer verbo fora daqui vira `mutation` (fail-closed).
+ * Confere com as 374 procedures do 2.32.2 e com as 19 leituras das tools curadas.
+ */
+const READ_VERBS = new Set(["get", "list", "inspect", "check", "query", "search"]);
+
+/**
+ * Classifica pela convenção de nomes (`services.app.inspectService` → query).
+ * Só é usada quando o OpenAPI do painel não carrega mais a distinção (2.32+);
+ * o chamador restringe o uso a procedures que existem no spec.
+ */
+export function procKindFromName(procedure: string): ProcKind {
+  const leaf = procedure.split(".").pop() ?? "";
+  const verb = /^[a-z]+/.exec(leaf)?.[0];
+  return verb && READ_VERBS.has(verb) ? "query" : "mutation";
+}
+
+/**
+ * Monta o mapa procedure (minúscula) → natureza a partir do OpenAPI do painel.
+ * Duas formas de spec no mundo real:
+ *  - 2.31: paths já em `/api/rpc/*`, queries documentadas em GET → o método HTTP
+ *    dá a distinção (GET = query, só-POST = mutation).
+ *  - 2.32+: prefixo migrou para `servers[].url` e os paths ficaram nus
+ *    (`/projects/listProjects`); TUDO virou POST e o spec deixou de carregar
+ *    qualquer marca de leitura/escrita (sem `x-*`, sem GET) → cai na convenção
+ *    de nomes, ainda restrita às procedures presentes no spec.
+ * O nome sai do `operationId` (já é `ns.proc`), com o path como reserva.
+ */
+export function kindMapFromSpec(spec: any): Map<string, ProcKind> | null {
+  const paths = spec?.paths;
+  if (!paths || typeof paths !== "object") return null;
+  const base =
+    typeof spec?.servers?.[0]?.url === "string" ? spec.servers[0].url.replace(/\/+$/, "") : "";
+  const HTTP = ["get", "post", "put", "patch", "delete"];
+
+  const entries: { proc: string; methods: string[] }[] = [];
+  for (const [p, ops] of Object.entries<any>(paths)) {
+    if (!ops || typeof ops !== "object") continue;
+    const methods = HTTP.filter((m) => m in ops);
+    if (methods.length === 0) continue;
+    const opId = methods.map((m) => ops[m]?.operationId).find((v) => typeof v === "string");
+    let proc: string;
+    if (opId && /^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$/.test(opId)) {
+      proc = opId;
+    } else {
+      // Reserva: reconstrói do path. O prefixo pode já estar no path (2.31) ou
+      // vir de `servers` (2.32+) — normaliza as duas antes de exigir /api/rpc/.
+      const full = p.startsWith("/api/rpc/") ? p : base + p;
+      if (!full.startsWith("/api/rpc/")) continue;
+      proc = full.slice("/api/rpc/".length).split("/").join(".");
+    }
+    entries.push({ proc, methods });
+  }
+  if (entries.length === 0) return null;
+
+  // Um GET em qualquer lugar = spec ainda distingue leitura de escrita (2.31).
+  const specSeparatesByMethod = entries.some((e) => e.methods.includes("get"));
+  const map = new Map<string, ProcKind>();
+  for (const { proc, methods } of entries) {
+    const kind: ProcKind = specSeparatesByMethod
+      ? methods.includes("get")
+        ? "query"
+        : "mutation"
+      : procKindFromName(proc);
+    // Chave em minúsculas: o lookup também normaliza, para o guard não ser
+    // contornável por variação de caixa (a regex do trpc_raw aceita A-Z).
+    map.set(proc.toLowerCase(), kind);
+  }
+  return map;
+}
+
 /**
  * Prepara uma mensagem de erro estruturada do servidor para ir ao contexto do
  * LLM: colapsa whitespace e trunca. O campo é controlado pelo servidor — sem
@@ -68,9 +143,9 @@ export class EasyPanelClient {
   private baseUrl: string;
   private token: string;
   private flavorCache: ApiFlavor | null = null;
+  private kindMap: Map<string, ProcKind> | null = null;
+  private kindMapInFlight: Promise<Map<string, ProcKind> | null> | null = null;
   private flavorInFlight: Promise<ApiFlavor> | null = null;
-  private methodMap: Map<string, "GET" | "POST"> | null = null;
-  private methodMapInFlight: Promise<Map<string, "GET" | "POST"> | null> | null = null;
 
   constructor() {
     const url = process.env.EASYPANEL_URL;
@@ -134,40 +209,31 @@ export class EasyPanelClient {
   }
 
   /**
-   * Mapa procedure (minúscula) → método HTTP documentado, construído do OpenAPI
-   * do próprio painel (`/api/openapi.json`, disponível a partir do 2.31). No modo
-   * "rpc" TODAS as chamadas vão por POST, então o método HTTP deixou de separar
-   * leitura de escrita — este mapa devolve essa separação: `query()` recusa
-   * procedures documentadas como mutation, preservando o contrato do readonly
-   * e o gate de confirmação do trpc_raw. Falhas NÃO são cacheadas (a próxima
-   * chamada tenta de novo) e chamadas concorrentes compartilham o fetch em voo.
+   * Mapa procedure (minúscula) → leitura/escrita, construído do OpenAPI do próprio
+   * painel (`/api/openapi.json`, disponível a partir do 2.31). No modo "rpc" TODAS
+   * as chamadas vão por POST, então o método HTTP não separa mais leitura de
+   * escrita — este mapa devolve essa separação: `query()` recusa procedures
+   * classificadas como mutation, preservando o contrato do readonly e o gate de
+   * confirmação do trpc_raw. Falhas NÃO são cacheadas (a próxima chamada tenta de
+   * novo) e chamadas concorrentes compartilham o fetch em voo.
    */
-  private async getMethodMap(): Promise<Map<string, "GET" | "POST"> | null> {
-    if (this.methodMap) return this.methodMap;
-    if (!this.methodMapInFlight) {
-      this.methodMapInFlight = this.loadMethodMap().finally(() => {
-        this.methodMapInFlight = null;
+  private async getKindMap(): Promise<Map<string, ProcKind> | null> {
+    if (this.kindMap) return this.kindMap;
+    if (!this.kindMapInFlight) {
+      this.kindMapInFlight = this.loadKindMap().finally(() => {
+        this.kindMapInFlight = null;
       });
     }
-    return this.methodMapInFlight;
+    return this.kindMapInFlight;
   }
 
-  private async loadMethodMap(): Promise<Map<string, "GET" | "POST"> | null> {
+  private async loadKindMap(): Promise<Map<string, ProcKind> | null> {
     try {
       const res = await fetch(`${this.baseUrl}/api/openapi.json`, { headers: this.headers() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const spec = JSON.parse(await res.text());
-      const map = new Map<string, "GET" | "POST">();
-      for (const [p, ops] of Object.entries<Record<string, unknown>>(spec?.paths ?? {})) {
-        if (!p.startsWith("/api/rpc/")) continue;
-        // Chave em minúsculas: o lookup também normaliza, para o guard não ser
-        // contornável por variação de caixa (a regex do trpc_raw aceita A-Z).
-        const proc = p.slice("/api/rpc/".length).split("/").join(".").toLowerCase();
-        // GET documentado = query; só-POST = mutation.
-        map.set(proc, "get" in ops ? "GET" : "POST");
-      }
-      if (map.size === 0) throw new Error("spec sem paths /api/rpc/*");
-      this.methodMap = map;
+      const map = kindMapFromSpec(JSON.parse(await res.text()));
+      if (!map) throw new Error("spec sem procedures reconhecíveis");
+      this.kindMap = map;
       return map;
     } catch (err) {
       process.stderr.write(
@@ -198,20 +264,20 @@ export class EasyPanelClient {
       // documentado responde 400). Como POST executa qualquer procedure, o guard
       // abaixo impede que uma mutation passe por aqui "disfarçada" de leitura
       // (ex.: trpc_raw com isMutation=false) — readonly e CONFIRMO continuam valendo.
-      const map = await this.getMethodMap();
-      const documented = map?.get(procedure.toLowerCase());
-      if (documented === "POST") {
+      const map = await this.getKindMap();
+      const kind = map?.get(procedure.toLowerCase());
+      if (kind === "mutation") {
         throw new McpError(
           ErrorCode.InvalidRequest,
           `A procedure "${procedure}" é uma mutation (escrita) na API do Easypanel — ` +
             `chame-a como escrita (no trpc_raw: isMutation:true + confirm).`
         );
       }
-      if (opts.requireDocumentedQuery && documented !== "GET") {
+      if (opts.requireDocumentedQuery && kind !== "query") {
         throw new McpError(
           ErrorCode.InvalidRequest,
           map
-            ? `A procedure "${procedure}" não está documentada como leitura no OpenAPI do painel — ` +
+            ? `A procedure "${procedure}" não consta como leitura no OpenAPI do painel — ` +
               `recusada por segurança (fail-closed). Se for uma escrita, use isMutation:true + confirm; ` +
               `se acredita que é leitura, confira o nome em GET ${this.baseUrl}/api/openapi.json.`
             : `Não foi possível carregar o OpenAPI do painel para classificar "${procedure}" — ` +

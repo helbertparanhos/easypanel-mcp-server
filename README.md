@@ -210,7 +210,7 @@ Covering every Easypanel procedure with a typed tool isn't practical, so anythin
 
 Useful namespaces only reachable via `trpc_raw`: `traefik.*`, `branding.*`, `cloudflareTunnel.*`, `box.*`, `middlewares.*`, `notifications.*`, `volumeBackups.*`, `databaseBackups.*`, `wordpress.*`, `git.*`, `update.*`.
 
-Procedure names use dot notation on both API generations — the client translates to the right transport. On panels ≥ 2.31 the client also validates the procedure against the panel's own OpenAPI spec, fail-closed: a `trpc_raw` read only executes if the spec documents the procedure as a query, so writes can't sneak past the `readonly` mode or the confirmation gate.
+Procedure names use dot notation on both API generations — the client translates to the right transport. On panels ≥ 2.31 the client also classifies the procedure against the panel's own OpenAPI spec, fail-closed: a `trpc_raw` read only executes if the procedure comes back as a query, so writes can't sneak past the `readonly` mode or the confirmation gate. On 2.31 that classification is the documented HTTP method; on 2.32+, where the spec is POST-only and no longer carries it, the client falls back to the panel's naming convention (`get`/`list`/`inspect`/`check`/`query`/`search` = read, anything else = write), restricted to procedures present in the spec.
 
 ---
 

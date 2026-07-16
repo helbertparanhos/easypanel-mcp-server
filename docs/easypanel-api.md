@@ -248,10 +248,24 @@ procedure diretamente:
 Mutations via `trpc_raw` pulam os guards das tools curadas, então a confirmação
 explícita é a rede de segurança mínima. Em `MCP_ACCESS_MODE=readonly`, qualquer
 mutation (curada ou raw) é bloqueada no client. Em painéis 2.31+ — onde todo o
-transporte é POST — o client valida a procedure contra o OpenAPI do painel de
-forma **fail-closed**: leituras via `trpc_raw` só executam se a procedure estiver
-documentada como query (spec indisponível ou procedure desconhecida → recusada),
-então não dá para executar escrita "disfarçada" de leitura.
+transporte é POST — o client classifica a procedure contra o OpenAPI do painel de
+forma **fail-closed**: leituras via `trpc_raw` só executam se a procedure constar
+como query (spec indisponível ou procedure desconhecida → recusada), então não dá
+para executar escrita "disfarçada" de leitura.
+
+De onde sai a classificação depende da geração do spec:
+
+| Spec | Sinal de leitura/escrita |
+|------|--------------------------|
+| 2.31 | Método HTTP documentado: `GET` = query, só-`POST` = mutation |
+| 2.32+ | **Não existe mais** (tudo é POST, sem `x-*`) → convenção de nomes: o verbo inicial da procedure (`get`/`list`/`inspect`/`check`/`query`/`search` = query; qualquer outro = mutation), restrita às procedures presentes no spec |
+
+O fallback do 2.32+ é fail-closed por construção (verbo desconhecido → mutation) e
+está coberto por teste contra as 19 leituras das tools curadas — ver
+[`kindMapFromSpec`](../src/client.ts). É um sinal mais fraco que o do 2.31: se o
+painel algum dia expuser uma escrita chamada `getX`, ela seria classificada como
+leitura. Se um spec futuro voltar a marcar a natureza da procedure, prefira esse
+sinal a este fallback.
 
 > ⚠️ **Reads via `trpc_raw` não são protegidos pelo readonly** e podem retornar
 > dados sensíveis (ex.: `services.app.inspectService` devolve env vars com secrets de
@@ -279,8 +293,11 @@ de uma vez. Default: `full`.
 ## Como descobrir novas procedures
 
 1. **OpenAPI do painel (2.31+):** `GET /api/openapi.json` (com o Bearer token)
-   devolve o spec completo — ~373 endpoints com schemas de input. É a fonte
-   primária a partir do 2.31; `GET` = query, só-`POST` = mutation.
+   devolve o spec completo — ~374 endpoints com schemas de input. É a fonte
+   primária a partir do 2.31. No 2.31 o método separa a natureza (`GET` = query,
+   só-`POST` = mutation); **no 2.32+ tudo virou POST**, o prefixo `/api/rpc` saiu
+   dos paths para `servers[].url`, e o nome da procedure passou a viver no
+   `operationId`.
 2. **Inspecionar o tráfego do painel:** abra o DevTools (aba Network), execute a
    ação desejada na UI do Easypanel e observe a chamada para
    `/api/trpc/...` ou `/api/rpc/...` — o nome e o payload aparecem ali.

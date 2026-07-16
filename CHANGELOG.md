@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.1] - 2026-07-16
+
+### Fixed
+- **Easypanel 2.32 quebrou o parse do OpenAPI do painel.** O 2.32 reorganizou o spec: o prefixo `/api/rpc` saiu dos paths e foi para `servers[].url` (paths ficaram nus, `/projects/listProjects`), e o nome da procedure passou a viver no `operationId`. O `loadMethodMap` do v2.0.0 filtrava por `p.startsWith("/api/rpc/")` → **mapa vazio** → aviso em stderr e **toda leitura via `trpc_raw` recusada** (fail-closed) em painéis 2.32+. O parser agora lê o `operationId` (com o path + `servers` como reserva) e monta as 374 procedures do 2.32.2. Tools curadas não eram afetadas.
+- **A classificação leitura/escrita sumiu do spec no 2.32** — os 374 endpoints são POST-only, sem `GET` e sem extensão `x-*`. A heurística `GET = query` do v2.0.0 classificaria **toda leitura como mutation**, e `query()` recusaria as 19 leituras das tools curadas. Quando o spec não tem nenhum `GET`, o client agora classifica pela convenção de nomes do painel (`get`/`list`/`inspect`/`check`/`query`/`search` = query; qualquer outro verbo = mutation), restrita às procedures presentes no spec. Specs 2.31 seguem usando o método HTTP, que é o sinal mais forte.
+
+### Security
+- O fallback do 2.32+ é **fail-closed por construção**: verbo desconhecido → `mutation` → leitura via `trpc_raw` recusada. `MCP_ACCESS_MODE=readonly` e o gate `CONFIRMO` seguem valendo. É um sinal mais fraco que o método HTTP do 2.31 — uma escrita nomeada `getX` seria classificada como leitura. Auditado contra as 374 procedures do 2.32.2 ao vivo: 102 query / 272 mutation, nenhuma escrita conhecida classificada como leitura.
+
+### Notes
+- **Se todas as chamadas falham com `405 Method Not Supported` num painel 2.31+**, verifique se `EASYPANEL_API_FLAVOR` está fixada em `trpc` no ambiente: o modo legado usa `GET /api/trpc/*`, que o painel novo recusa com 405. Remova a variável (a auto-detecção acerta) ou fixe em `rpc`.
+
+### Internal
+- `kindMapFromSpec` e `procKindFromName` exportadas e testadas (28 → 34 testes), incluindo um teste que trava as 19 leituras curadas contra regressão de classificação.
+
 ## [2.0.0] - 2026-06-12
 
 ### ⚠️ Breaking / Compatibilidade
