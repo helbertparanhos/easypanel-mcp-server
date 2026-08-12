@@ -261,7 +261,7 @@ export function extractServiceType(
  * Retorna `null` se não conseguir determinar — nesse caso o chamador mantém o
  * comportamento padrão (`app`), preservando a compatibilidade.
  */
-async function resolveServiceType(
+export async function resolveServiceType(
   client: ReturnType<typeof getClient>,
   projectName: string,
   serviceName: string
@@ -274,13 +274,57 @@ async function resolveServiceType(
   }
 }
 
+/** Tipos que são banco de dados — não têm deploy/start/stop/restart próprios. */
+const DB_TYPES: readonly ServiceType[] = ["postgres", "mysql", "mariadb", "mongo", "redis"];
+
+/** Grafia do tipo na API pública (`enableMongoDBService`, `enableMySQLService`, …). */
+const DB_LABELS: Record<string, string> = {
+  postgres: "Postgres",
+  mysql: "MySQL",
+  mariadb: "MariaDB",
+  mongo: "MongoDB",
+  redis: "Redis",
+};
+function dbLabel(type: ServiceType): string {
+  return DB_LABELS[type] ?? type;
+}
+
+/**
+ * Resposta padrão para uma ação de ciclo de vida que o tipo do serviço não
+ * expõe. Melhor que disparar no namespace errado (era o que acontecia até a v2:
+ * `destroy_service`/`inspect_service` chamavam `services.app.*` mesmo em compose
+ * e bancos, resultando em 404 opaco).
+ */
+function unsupportedForType(
+  ctx: string,
+  action: string,
+  type: ServiceType,
+  motivo: string,
+  alternativa: string
+) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: ok(ctx, { status: "nao_suportado", acao: action, tipo: type, motivo, alternativa }),
+      },
+    ],
+  };
+}
+
 export async function handleServiceTool(name: string, args: Args) {
   const client = getClient();
   const { projectName, serviceName } = args as { projectName: string; serviceName: string };
   const ctx = contextHeader(projectName, serviceName);
 
   if (name === "inspect_service") {
-    const result = await client.query("services.app.inspectService", { projectName, serviceName });
+    // Cada tipo tem seu próprio inspectService. Até a v2 esta tool sempre chamava
+    // o namespace `app`, então inspecionar um compose ou um banco dava 404.
+    const type = (await resolveServiceType(client, projectName, serviceName)) ?? "app";
+    const result = await client.query(`services.${type}.inspectService`, {
+      projectName,
+      serviceName,
+    });
     return { content: [{ type: "text" as const, text: ok(ctx, result) }] };
   }
 
@@ -341,9 +385,17 @@ export async function handleServiceTool(name: string, args: Args) {
       `serviço "${serviceName}" no projeto "${projectName}"`
     );
     if (blocked) return { content: [{ type: "text" as const, text: ctx + blocked }] };
-    await client.mutate("services.app.destroyService", { projectName, serviceName });
+    // Cada tipo tem seu próprio destroyService — chamar o do `app` num compose ou
+    // banco falhava com 404 (bug até a v2).
+    const type = (await resolveServiceType(client, projectName, serviceName)) ?? "app";
+    await client.mutate(`services.${type}.destroyService`, { projectName, serviceName });
     return {
-      content: [{ type: "text" as const, text: ok(ctx, { status: "destruido", projectName, serviceName }) }],
+      content: [
+        {
+          type: "text" as const,
+          text: ok(ctx, { status: "destruido", tipo: type, projectName, serviceName }),
+        },
+      ],
     };
   }
 
@@ -351,6 +403,15 @@ export async function handleServiceTool(name: string, args: Args) {
     // Compose vive em outro namespace: services.app.deployService dá 404/500 num
     // serviço compose. Detecta o tipo e roteia para services.compose.deployService.
     const type = await resolveServiceType(client, projectName, serviceName);
+    if (type && DB_TYPES.includes(type)) {
+      return unsupportedForType(
+        ctx,
+        "deploy_service",
+        type,
+        "Serviços de banco de dados não têm deploy — a imagem sobe na criação e é gerenciada pelo painel.",
+        "Use inspect_database para ver o estado, ou restart_service não se aplica a bancos."
+      );
+    }
     const procedure = type === "compose" ? "services.compose.deployService" : "services.app.deployService";
     const result = await client.mutate(procedure, { projectName, serviceName });
     return {
@@ -372,9 +433,29 @@ export async function handleServiceTool(name: string, args: Args) {
 
   if (name === "start_service") {
     const type = await resolveServiceType(client, projectName, serviceName);
+    if (type && DB_TYPES.includes(type)) {
+      return unsupportedForType(
+        ctx,
+        "start_service",
+        type,
+        "Bancos de dados são ligados/desligados por procedures próprias (enable/disable), não por start.",
+        `Use easypanel_raw com isMutation:true e procedure "enable${dbLabel(type)}Service".`
+      );
+    }
     if (type === "compose") {
-      // services.compose não tem startService confirmado. Subir um stack parado =
-      // redeploy (docker compose up). Roteamos para a procedure confirmada.
+      // O 2.33 documenta startComposeService na API pública. Em painéis antigos
+      // não havia procedure confirmada — ali subir um stack parado = redeploy.
+      if (await client.supportsComposeLifecycle()) {
+        await client.mutate("services.compose.startService", { projectName, serviceName });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: ok(ctx, { status: "iniciado", tipo: "compose", projectName, serviceName }),
+            },
+          ],
+        };
+      }
       const result = await client.mutate("services.compose.deployService", { projectName, serviceName });
       return {
         content: [
@@ -383,7 +464,7 @@ export async function handleServiceTool(name: string, args: Args) {
             text: ok(ctx, {
               status: "iniciado",
               tipo: "compose",
-              via: "services.compose.deployService (compose up)",
+              via: "services.compose.deployService (compose up — painel sem start dedicado)",
               projectName,
               serviceName,
               resultado: result,
@@ -405,25 +486,37 @@ export async function handleServiceTool(name: string, args: Args) {
     );
     if (blocked) return { content: [{ type: "text" as const, text: ctx + blocked }] };
     const type = await resolveServiceType(client, projectName, serviceName);
+    if (type && DB_TYPES.includes(type)) {
+      return unsupportedForType(
+        ctx,
+        "stop_service",
+        type,
+        "Bancos de dados são ligados/desligados por procedures próprias (enable/disable), não por stop.",
+        `Use easypanel_raw com isMutation:true e procedure "disable${dbLabel(type)}Service".`
+      );
+    }
     if (type === "compose") {
-      // services.compose não tem stopService confirmado e parar ≠ redeploy (não há
-      // procedure de leitura segura que mapeie 1:1). Em vez de disparar uma mutation
-      // no escuro, devolvemos orientação acionável — melhor que um 404 opaco.
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: ok(ctx, {
-              status: "nao_suportado",
-              tipo: "compose",
-              motivo:
-                "Parar um serviço compose não tem procedure tRPC confirmada neste MCP. " +
-                "Use o botão 'Stop' do serviço no painel do Easypanel, ou trpc_raw após confirmar a procedure correta.",
-              alternativa: "Para recriar/atualizar os containers, use deploy_service ou restart_service (ambos roteiam para compose deploy).",
-            }),
-          },
-        ],
-      };
+      // O 2.33 documenta stopComposeService na API pública. Em painéis antigos não
+      // havia procedure confirmada, e parar ≠ redeploy — ali seguimos orientando
+      // em vez de disparar uma escrita no escuro.
+      if (await client.supportsComposeLifecycle()) {
+        await client.mutate("services.compose.stopService", { projectName, serviceName });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: ok(ctx, { status: "parado", tipo: "compose", projectName, serviceName }),
+            },
+          ],
+        };
+      }
+      return unsupportedForType(
+        ctx,
+        "stop_service",
+        "compose",
+        "Parar um serviço compose só tem procedure documentada a partir do Easypanel 2.33; este painel é mais antigo.",
+        "Use o botão 'Stop' do serviço no painel, ou atualize o Easypanel."
+      );
     }
     await client.mutate("services.app.stopService", { projectName, serviceName });
     return { content: [{ type: "text" as const, text: ok(ctx, { status: "parado", projectName, serviceName }) }] };
@@ -431,10 +524,29 @@ export async function handleServiceTool(name: string, args: Args) {
 
   if (name === "restart_service") {
     const type = await resolveServiceType(client, projectName, serviceName);
+    if (type && DB_TYPES.includes(type)) {
+      return unsupportedForType(
+        ctx,
+        "restart_service",
+        type,
+        "Bancos de dados não expõem restart; o ciclo é desligar e ligar (disable/enable).",
+        `Use easypanel_raw com isMutation:true: "disable${dbLabel(type)}Service" e depois "enable${dbLabel(type)}Service".`
+      );
+    }
     if (type === "compose") {
-      // services.compose não tem restartService confirmado. Para compose, "restart"
-      // = redeploy (docker compose up recria os containers) — exatamente o que faz a
-      // procedure confirmada services.compose.deployService.
+      // O 2.33 documenta restartComposeService. Em painéis antigos, "restart" de
+      // compose = redeploy (docker compose up recria os containers).
+      if (await client.supportsComposeLifecycle()) {
+        await client.mutate("services.compose.restartService", { projectName, serviceName });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: ok(ctx, { status: "reiniciado", tipo: "compose", projectName, serviceName }),
+            },
+          ],
+        };
+      }
       const result = await client.mutate("services.compose.deployService", { projectName, serviceName });
       return {
         content: [
@@ -443,7 +555,7 @@ export async function handleServiceTool(name: string, args: Args) {
             text: ok(ctx, {
               status: "reiniciado",
               tipo: "compose",
-              via: "services.compose.deployService (redeploy = restart em compose)",
+              via: "services.compose.deployService (redeploy — painel sem restart dedicado)",
               projectName,
               serviceName,
               resultado: result,

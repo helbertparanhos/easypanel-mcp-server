@@ -1,12 +1,21 @@
 {
   "name": "easypanel-mcp-server",
   "displayName": "Easypanel MCP Server",
-  "description": "Full control of Easypanel from Claude Code, Cursor and Claude Desktop — deploy (app & compose), runtime logs, container exec, env vars, domains, databases, volumes, ports, resource limits, Docker maintenance and monitoring. 57 tools with built-in safety guards, optional read-only mode, plus a trpc_raw escape hatch to any of Easypanel's ~347 procedures.",
-  "version": "1.3.0",
+  "description": "Full control of Easypanel from Claude Code, Cursor and Claude Desktop — deploy (app & compose), runtime logs, container exec, env vars, domains, databases, volumes, ports, resource limits, Docker maintenance and monitoring. 57 tools with built-in safety guards, optional read-only mode, plus an easypanel_raw escape hatch to any of Easypanel's ~375 API operations.",
+  "version": "3.0.0",
   "author": "helbertparanhos",
   "license": "MIT",
   "category": "DevOps",
-  "tags": ["easypanel", "deployment", "docker", "compose", "devops", "hosting", "databases", "monitoring"],
+  "tags": [
+    "easypanel",
+    "deployment",
+    "docker",
+    "compose",
+    "devops",
+    "hosting",
+    "databases",
+    "monitoring"
+  ],
   "repository": "https://github.com/helbertparanhos/easypanel-mcp-server",
   "npm": "easypanel-mcp-server",
   "tools": 57,
@@ -28,6 +37,9 @@
   ],
   "quickstart": {
     "command": "npx",
-    "args": ["-y", "easypanel-mcp-server"]
+    "args": [
+      "-y",
+      "easypanel-mcp-server"
+    ]
   }
 }

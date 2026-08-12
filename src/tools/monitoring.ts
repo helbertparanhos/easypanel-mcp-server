@@ -6,7 +6,7 @@ export const monitoringTools: Tool[] = [
   {
     name: "get_docker_stats",
     description:
-      "Retorna estatísticas dos containers Docker em execução: CPU, memória, rede por container.",
+      "Retorna o estado das tasks Docker de cada serviço: réplicas em execução (actual) vs desejadas (desired). Use para ver rapidamente o que está no ar, escalado ou caído. Para CPU/memória de um serviço use get_service_stats.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -17,7 +17,7 @@ export const monitoringTools: Tool[] = [
   {
     name: "get_service_stats",
     description:
-      "Retorna métricas de um serviço específico: CPU e memória do container.",
+      "Retorna métricas de um serviço específico: CPU, memória e rede do container.",
     inputSchema: {
       type: "object",
       properties: {
@@ -47,14 +47,31 @@ export async function handleMonitoringTool(name: string, args: Args) {
   if (name === "get_service_stats") {
     const { projectName, serviceName } = args as { projectName: string; serviceName: string };
     const ctx = contextHeader(projectName, serviceName);
-    // getDockerTaskStats retorna um objeto chaveado pelo nome do serviço Docker
-    // (`${projectName}_${serviceName}`), não um array. Indexamos a chave exata —
-    // antes o código retornava as métricas de TODOS os serviços por engano.
+
+    // `getServiceStats` devolve o que a tool promete — { cpu:{percent},
+    // memory:{percent,usage}, network:{in,out} }. Até a v2 esta tool lia
+    // `getDockerTaskStats`, que só traz contagem de réplicas ({actual,desired}):
+    // o retorno não tinha nada de CPU/memória apesar da descrição.
+    try {
+      const stats = await client.query<unknown>("monitorOld.getServiceStats", {
+        projectName,
+        serviceName,
+      });
+      if (stats !== null && stats !== undefined) {
+        return { content: [{ type: "text" as const, text: ok(ctx, stats) }] };
+      }
+    } catch {
+      // Painel antigo sem essa procedure — cai nas réplicas abaixo, rotuladas
+      // pelo que realmente são.
+    }
+
+    // Fallback: estado das tasks. O objeto vem chaveado pelo nome do serviço
+    // Docker (`${projectName}_${serviceName}`), não é um array.
     const result = await client.query<Record<string, unknown>>("monitorOld.getDockerTaskStats");
     const key = `${projectName}_${serviceName}`;
-    const stats =
+    const replicas =
       result && typeof result === "object" && !Array.isArray(result) ? result[key] : undefined;
-    if (stats === undefined) {
+    if (replicas === undefined) {
       return {
         content: [
           {
@@ -68,7 +85,17 @@ export async function handleMonitoringTool(name: string, args: Args) {
         ],
       };
     }
-    return { content: [{ type: "text" as const, text: ok(ctx, stats) }] };
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: ok(ctx, {
+            aviso: "Métricas de CPU/memória indisponíveis neste painel; retornando o estado das réplicas.",
+            replicas,
+          }),
+        },
+      ],
+    };
   }
 
   throw new Error(`Tool desconhecida: ${name}`);

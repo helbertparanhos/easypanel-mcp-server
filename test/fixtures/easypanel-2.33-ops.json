@@ -1,0 +1,1347 @@
+{
+ "panelVersion": "2.33.1",
+ "openapi": "3.1.1",
+ "servers": [
+  {
+   "url": "/api"
+  }
+ ],
+ "totalOps": 375,
+ "ops": {
+  "getAction": {
+   "method": "get",
+   "params": {
+    "id": "string"
+   }
+  },
+  "killAction": {
+   "method": "post"
+  },
+  "listActions": {
+   "method": "get",
+   "params": {
+    "limit": "number",
+    "projectName": "string",
+    "serviceName": "string",
+    "type": "string"
+   }
+  },
+  "getSession": {
+   "method": "get"
+  },
+  "getUser": {
+   "method": "get"
+  },
+  "login": {
+   "method": "post"
+  },
+  "logout": {
+   "method": "post"
+  },
+  "getBasicSettings": {
+   "method": "get"
+  },
+  "getCustomCodeSettings": {
+   "method": "get"
+  },
+  "getErrorPageSettings": {
+   "method": "get"
+  },
+  "getInterfaceSettingsPublic": {
+   "method": "get"
+  },
+  "getLinksSettings": {
+   "method": "get"
+  },
+  "getLogoSettings": {
+   "method": "get"
+  },
+  "getOtherLinksSettings": {
+   "method": "get"
+  },
+  "setBasicSettings": {
+   "method": "post"
+  },
+  "setCustomCodeSettings": {
+   "method": "post"
+  },
+  "setErrorPageSettings": {
+   "method": "post"
+  },
+  "setLinksSettings": {
+   "method": "post"
+  },
+  "setLogoSettings": {
+   "method": "post"
+  },
+  "listCertificates": {
+   "method": "get"
+  },
+  "removeCertificate": {
+   "method": "post"
+  },
+  "createTunnelRule": {
+   "method": "post"
+  },
+  "deleteTunnelRule": {
+   "method": "post"
+  },
+  "getConfig": {
+   "method": "get"
+  },
+  "getTunnelRules": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "listAccounts": {
+   "method": "get",
+   "params": {
+    "apiToken": "string"
+   }
+  },
+  "listTunnels": {
+   "method": "get",
+   "params": {
+    "accountId": "string",
+    "apiToken": "string"
+   }
+  },
+  "listZones": {
+   "method": "get"
+  },
+  "setConfig": {
+   "method": "post"
+  },
+  "startTunnel": {
+   "method": "post"
+  },
+  "stopTunnel": {
+   "method": "post"
+  },
+  "updateTunnelRule": {
+   "method": "post"
+  },
+  "addWorkerCommand": {
+   "method": "get"
+  },
+  "listNodes": {
+   "method": "get"
+  },
+  "removeNode": {
+   "method": "post"
+  },
+  "createDatabaseBackup": {
+   "method": "post"
+  },
+  "deleteDatabaseBackup": {
+   "method": "post"
+  },
+  "getServiceDatabases": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "listDatabaseBackups": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "restoreDatabaseBackup": {
+   "method": "post"
+  },
+  "runDatabaseBackup": {
+   "method": "post"
+  },
+  "updateDatabaseBackup": {
+   "method": "post"
+  },
+  "createDockerBuilder": {
+   "method": "post"
+  },
+  "listDockerBuilders": {
+   "method": "get"
+  },
+  "removeDockerBuilder": {
+   "method": "post"
+  },
+  "stopDockerBuilder": {
+   "method": "post"
+  },
+  "useDockerBuilder": {
+   "method": "post"
+  },
+  "createDomain": {
+   "method": "post"
+  },
+  "deleteDomain": {
+   "method": "post"
+  },
+  "getPrimaryDomain": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "listDomains": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "setPrimaryDomain": {
+   "method": "post"
+  },
+  "updateDomain": {
+   "method": "post"
+  },
+  "generateKey": {
+   "method": "post"
+  },
+  "getPublicKey": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "searchBranches": {
+   "method": "get",
+   "params": {
+    "owner": "string",
+    "repo": "string",
+    "search": "string"
+   }
+  },
+  "searchRepos": {
+   "method": "get"
+  },
+  "activateLemonLicense": {
+   "method": "post"
+  },
+  "activateByOrder": {
+   "method": "post"
+  },
+  "deactivateLemonLicense": {
+   "method": "post"
+  },
+  "getLicenseKey": {
+   "method": "get"
+  },
+  "getLemonLicensePayload": {
+   "method": "get"
+  },
+  "getLogsSettings": {
+   "method": "get"
+  },
+  "getLogsStats": {
+   "method": "get"
+  },
+  "queryComposeServiceLogs": {
+   "method": "get",
+   "params": {
+    "composeInternalService": "string",
+    "end": "string",
+    "levels": "array",
+    "limit": "number",
+    "projectName": "string",
+    "search": "string",
+    "serviceName": "string",
+    "start": "string",
+    "stream": "string"
+   }
+  },
+  "queryServiceLogs": {
+   "method": "get",
+   "params": {
+    "end": "string",
+    "levels": "array",
+    "limit": "number",
+    "projectName": "string",
+    "search": "string",
+    "serviceName": "string",
+    "start": "string",
+    "stream": "string"
+   }
+  },
+  "updateLogsSettings": {
+   "method": "post"
+  },
+  "getAllServicesStats": {
+   "method": "get"
+  },
+  "getMetricsServiceStats": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "range": "number",
+    "serviceName": "string",
+    "step": "string"
+   }
+  },
+  "getMetricsSettings": {
+   "method": "get"
+  },
+  "getMetricsStats": {
+   "method": "get"
+  },
+  "getMetricsSystemStats": {
+   "method": "get",
+   "params": {
+    "range": "number",
+    "step": "string"
+   }
+  },
+  "updateMetricsSettings": {
+   "method": "post"
+  },
+  "createMiddleware": {
+   "method": "post"
+  },
+  "destroyMiddleware": {
+   "method": "post"
+  },
+  "listMiddlewares": {
+   "method": "get"
+  },
+  "updateMiddleware": {
+   "method": "post"
+  },
+  "getAdvancedStats": {
+   "method": "get"
+  },
+  "getDockerTaskStats": {
+   "method": "get"
+  },
+  "getMonitorTableData": {
+   "method": "get"
+  },
+  "getLegacyMonitorServiceStats": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getStorageStats": {
+   "method": "get"
+  },
+  "getLegacyMonitorSystemStats": {
+   "method": "get"
+  },
+  "createMount": {
+   "method": "post"
+  },
+  "deleteMount": {
+   "method": "post"
+  },
+  "listMounts": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updateMount": {
+   "method": "post"
+  },
+  "createNotificationChannel": {
+   "method": "post"
+  },
+  "destroyNotificationChannel": {
+   "method": "post"
+  },
+  "listNotificationChannels": {
+   "method": "get"
+  },
+  "sendTestNotification": {
+   "method": "post"
+  },
+  "updateNotificationChannel": {
+   "method": "post"
+  },
+  "activatePortalLicense": {
+   "method": "post"
+  },
+  "deactivatePortalLicense": {
+   "method": "post"
+  },
+  "getPortalLicensePayload": {
+   "method": "get"
+  },
+  "createPort": {
+   "method": "post"
+  },
+  "deleteAllPorts": {
+   "method": "post"
+  },
+  "deletePort": {
+   "method": "post"
+  },
+  "listPorts": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updatePort": {
+   "method": "post"
+  },
+  "canCreateProject": {
+   "method": "get"
+  },
+  "createProject": {
+   "method": "post"
+  },
+  "destroyProject": {
+   "method": "post"
+  },
+  "getDockerContainers": {
+   "method": "get",
+   "params": {
+    "service": "string"
+   }
+  },
+  "inspectProject": {
+   "method": "get",
+   "params": {
+    "projectName": "string"
+   }
+  },
+  "listProjects": {
+   "method": "get"
+  },
+  "listProjectsAndServices": {
+   "method": "get"
+  },
+  "updateAccess": {
+   "method": "post"
+  },
+  "updateProjectEnv": {
+   "method": "post"
+  },
+  "reboot": {
+   "method": "post"
+  },
+  "createAppService": {
+   "method": "post"
+  },
+  "deployAppService": {
+   "method": "post"
+  },
+  "destroyAppService": {
+   "method": "post"
+  },
+  "disableAppGithubDeploy": {
+   "method": "post"
+  },
+  "enableAppGithubDeploy": {
+   "method": "post"
+  },
+  "getAppExposedPorts": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "inspectAppService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "refreshAppDeployToken": {
+   "method": "post"
+  },
+  "restartAppService": {
+   "method": "post"
+  },
+  "startAppService": {
+   "method": "post"
+  },
+  "stopAppService": {
+   "method": "post"
+  },
+  "updateAppBasicAuth": {
+   "method": "post"
+  },
+  "updateAppBuild": {
+   "method": "post"
+  },
+  "updateAppDeploy": {
+   "method": "post"
+  },
+  "updateAppEnv": {
+   "method": "post"
+  },
+  "updateAppMaintenance": {
+   "method": "post"
+  },
+  "updateAppRedirects": {
+   "method": "post"
+  },
+  "updateAppResources": {
+   "method": "post"
+  },
+  "updateAppScripts": {
+   "method": "post"
+  },
+  "updateAppSourceDockerfile": {
+   "method": "post"
+  },
+  "updateAppSourceGit": {
+   "method": "post"
+  },
+  "updateAppSourceGithub": {
+   "method": "post"
+  },
+  "updateAppSourceImage": {
+   "method": "post"
+  },
+  "uploadAppCodeArchive": {
+   "method": "post"
+  },
+  "createBoxService": {
+   "method": "post"
+  },
+  "destroyBoxService": {
+   "method": "post"
+  },
+  "gitBoxClone": {
+   "method": "post"
+  },
+  "initBoxService": {
+   "method": "post"
+  },
+  "inspectBoxService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "listBoxPresets": {
+   "method": "get"
+  },
+  "loadBoxPreset": {
+   "method": "post"
+  },
+  "rebuildBoxDockerImage": {
+   "method": "post"
+  },
+  "refreshBoxDeployToken": {
+   "method": "post"
+  },
+  "restartBoxService": {
+   "method": "post"
+  },
+  "runBoxDeployScript": {
+   "method": "post"
+  },
+  "runBoxScript": {
+   "method": "post"
+  },
+  "startBoxService": {
+   "method": "post"
+  },
+  "stopBoxService": {
+   "method": "post"
+  },
+  "updateBoxAdvanced": {
+   "method": "post"
+  },
+  "updateBoxBasicAuth": {
+   "method": "post"
+  },
+  "updateBoxDeployScript": {
+   "method": "post"
+  },
+  "updateBoxEnv": {
+   "method": "post"
+  },
+  "updateBoxGitConfig": {
+   "method": "post"
+  },
+  "updateBoxIde": {
+   "method": "post"
+  },
+  "updateBoxModules": {
+   "method": "post"
+  },
+  "updateBoxNginx": {
+   "method": "post"
+  },
+  "updateBoxNodejs": {
+   "method": "post"
+  },
+  "updateBoxPhp": {
+   "method": "post"
+  },
+  "updateBoxProcesses": {
+   "method": "post"
+  },
+  "updateBoxPython": {
+   "method": "post"
+  },
+  "updateBoxRedirects": {
+   "method": "post"
+  },
+  "updateBoxResources": {
+   "method": "post"
+  },
+  "updateBoxRuby": {
+   "method": "post"
+  },
+  "updateBoxScripts": {
+   "method": "post"
+  },
+  "getServiceNotes": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getServiceError": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "renameService": {
+   "method": "post"
+  },
+  "setServiceNotes": {
+   "method": "post"
+  },
+  "createComposeService": {
+   "method": "post"
+  },
+  "deployComposeService": {
+   "method": "post"
+  },
+  "destroyComposeService": {
+   "method": "post"
+  },
+  "getComposeDockerServices": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getComposeIssues": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "inspectComposeService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "refreshComposeDeployToken": {
+   "method": "post"
+  },
+  "restartComposeService": {
+   "method": "post"
+  },
+  "startComposeService": {
+   "method": "post"
+  },
+  "stopComposeService": {
+   "method": "post"
+  },
+  "updateComposeBasicAuth": {
+   "method": "post"
+  },
+  "updateComposeEnv": {
+   "method": "post"
+  },
+  "updateComposeMaintenance": {
+   "method": "post"
+  },
+  "updateComposeRedirects": {
+   "method": "post"
+  },
+  "updateComposeSourceGit": {
+   "method": "post"
+  },
+  "updateComposeSourceInline": {
+   "method": "post"
+  },
+  "createMariaDBService": {
+   "method": "post"
+  },
+  "destroyMariaDBService": {
+   "method": "post"
+  },
+  "disableMariaDBDbGate": {
+   "method": "post"
+  },
+  "disableMariaDBPhpMyAdmin": {
+   "method": "post"
+  },
+  "disableMariaDBService": {
+   "method": "post"
+  },
+  "enableMariaDBDbGate": {
+   "method": "post"
+  },
+  "enableMariaDBPhpMyAdmin": {
+   "method": "post"
+  },
+  "enableMariaDBService": {
+   "method": "post"
+  },
+  "exposeMariaDBService": {
+   "method": "post"
+  },
+  "inspectMariaDBService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updateMariaDBAdvanced": {
+   "method": "post"
+  },
+  "updateMariaDBCredentials": {
+   "method": "post"
+  },
+  "updateMariaDBResources": {
+   "method": "post"
+  },
+  "createMongoDBService": {
+   "method": "post"
+  },
+  "destroyMongoDBService": {
+   "method": "post"
+  },
+  "disableMongoDBDbGate": {
+   "method": "post"
+  },
+  "disableMongoDBMongoExpress": {
+   "method": "post"
+  },
+  "disableMongoDBService": {
+   "method": "post"
+  },
+  "enableMongoDBDbGate": {
+   "method": "post"
+  },
+  "enableMongoDBMongoExpress": {
+   "method": "post"
+  },
+  "enableMongoDBService": {
+   "method": "post"
+  },
+  "exposeMongoDBService": {
+   "method": "post"
+  },
+  "inspectMongoDBService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updateMongoDBAdvanced": {
+   "method": "post"
+  },
+  "updateMongoDBCredentials": {
+   "method": "post"
+  },
+  "updateMongoDBResources": {
+   "method": "post"
+  },
+  "createMySQLService": {
+   "method": "post"
+  },
+  "destroyMySQLService": {
+   "method": "post"
+  },
+  "disableMySQLDbGate": {
+   "method": "post"
+  },
+  "disableMySQLPhpMyAdmin": {
+   "method": "post"
+  },
+  "disableMySQLService": {
+   "method": "post"
+  },
+  "enableMySQLDbGate": {
+   "method": "post"
+  },
+  "enableMySQLPhpMyAdmin": {
+   "method": "post"
+  },
+  "enableMySQLService": {
+   "method": "post"
+  },
+  "exposeMySQLService": {
+   "method": "post"
+  },
+  "inspectMySQLService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updateMySQLAdvanced": {
+   "method": "post"
+  },
+  "updateMySQLCredentials": {
+   "method": "post"
+  },
+  "updateMySQLResources": {
+   "method": "post"
+  },
+  "createPostgresService": {
+   "method": "post"
+  },
+  "destroyPostgresService": {
+   "method": "post"
+  },
+  "disablePostgresDbGate": {
+   "method": "post"
+  },
+  "disablePostgresPgWeb": {
+   "method": "post"
+  },
+  "disablePostgresService": {
+   "method": "post"
+  },
+  "enablePostgresDbGate": {
+   "method": "post"
+  },
+  "enablePostgresPgWeb": {
+   "method": "post"
+  },
+  "enablePostgresService": {
+   "method": "post"
+  },
+  "exposePostgresService": {
+   "method": "post"
+  },
+  "inspectPostgresService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updatePostgresAdvanced": {
+   "method": "post"
+  },
+  "updatePostgresCredentials": {
+   "method": "post"
+  },
+  "updatePostgresResources": {
+   "method": "post"
+  },
+  "createRedisService": {
+   "method": "post"
+  },
+  "destroyRedisService": {
+   "method": "post"
+  },
+  "disableRedisDbGate": {
+   "method": "post"
+  },
+  "disableRedisCommander": {
+   "method": "post"
+  },
+  "disableRedisService": {
+   "method": "post"
+  },
+  "enableRedisDbGate": {
+   "method": "post"
+  },
+  "enableRedisCommander": {
+   "method": "post"
+  },
+  "enableRedisService": {
+   "method": "post"
+  },
+  "exposeRedisService": {
+   "method": "post"
+  },
+  "inspectRedisService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "updateRedisAdvanced": {
+   "method": "post"
+  },
+  "updateRedisCredentials": {
+   "method": "post"
+  },
+  "updateRedisResources": {
+   "method": "post"
+  },
+  "activateWordPressPlugin": {
+   "method": "post"
+  },
+  "activateWordPressTheme": {
+   "method": "post"
+  },
+  "createWordPressOption": {
+   "method": "post"
+  },
+  "createWordPressRole": {
+   "method": "post"
+  },
+  "createWordPressService": {
+   "method": "post"
+  },
+  "createWordPressUser": {
+   "method": "post"
+  },
+  "dbWordPressOptimize": {
+   "method": "post"
+  },
+  "deactivateWordPressPlugin": {
+   "method": "post"
+  },
+  "deleteWordPressOption": {
+   "method": "post"
+  },
+  "deleteWordPressRole": {
+   "method": "post"
+  },
+  "deleteWordPressTransient": {
+   "method": "post"
+  },
+  "deleteWordPressUser": {
+   "method": "post"
+  },
+  "destroyWordPressService": {
+   "method": "post"
+  },
+  "flushWordPressCache": {
+   "method": "post"
+  },
+  "getWordPressDatabaseServices": {
+   "method": "get",
+   "params": {
+    "projectName": "string"
+   }
+  },
+  "getWordPressMaintenanceMode": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressOptions": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressPlugins": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressProfile": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string",
+    "stage": "string"
+   }
+  },
+  "getWordPressRoles": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressThemes": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressUsers": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "getWordPressWpConfig": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "gitWordPressClone": {
+   "method": "post"
+  },
+  "initWordPressService": {
+   "method": "post"
+  },
+  "inspectWordPressService": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "installWordPressPlugin": {
+   "method": "post"
+  },
+  "installWordPressTheme": {
+   "method": "post"
+  },
+  "mediaWordPressRegenerate": {
+   "method": "post"
+  },
+  "rebuildWordPressDockerImage": {
+   "method": "post"
+  },
+  "restartWordPressService": {
+   "method": "post"
+  },
+  "runWordPressScript": {
+   "method": "post"
+  },
+  "searchWordPressPlugin": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string",
+    "search": "string"
+   }
+  },
+  "searchWordPressReplace": {
+   "method": "post"
+  },
+  "searchWordPressReplaceDryRun": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string",
+    "replace": "string",
+    "search": "string"
+   }
+  },
+  "searchWordPressTheme": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string",
+    "search": "string"
+   }
+  },
+  "startWordPressService": {
+   "method": "post"
+  },
+  "stopWordPressService": {
+   "method": "post"
+  },
+  "updateWordPressBasicAuth": {
+   "method": "post"
+  },
+  "updateWordPressEnv": {
+   "method": "post"
+  },
+  "updateWordPressGitConfig": {
+   "method": "post"
+  },
+  "updateWordPressIde": {
+   "method": "post"
+  },
+  "updateWordPressMaintenanceMode": {
+   "method": "post"
+  },
+  "updateWordPressNginx": {
+   "method": "post"
+  },
+  "updateWordPressOption": {
+   "method": "post"
+  },
+  "updateWordPressPhp": {
+   "method": "post"
+  },
+  "updateWordPressRedirects": {
+   "method": "post"
+  },
+  "updateWordPressResources": {
+   "method": "post"
+  },
+  "updateWordPressScripts": {
+   "method": "post"
+  },
+  "updateWordPressUser": {
+   "method": "post"
+  },
+  "updateWordPressWpConfig": {
+   "method": "post"
+  },
+  "updateWordPressWpCore": {
+   "method": "post"
+  },
+  "changeCredentials": {
+   "method": "post"
+  },
+  "checkDockerUpdate": {
+   "method": "get"
+  },
+  "checkForUpdates": {
+   "method": "get"
+  },
+  "cleanupDockerBuilder": {
+   "method": "post"
+  },
+  "cleanupDockerImages": {
+   "method": "post"
+  },
+  "getDailyDockerCleanup": {
+   "method": "get"
+  },
+  "getDemoMode": {
+   "method": "get"
+  },
+  "getDockerVersion": {
+   "method": "get"
+  },
+  "getGithubToken": {
+   "method": "get"
+  },
+  "getGoogleAnalyticsMeasurementId": {
+   "method": "get"
+  },
+  "getLetsEncryptEmail": {
+   "method": "get"
+  },
+  "getPanelDomain": {
+   "method": "get"
+  },
+  "getServerIp": {
+   "method": "get"
+  },
+  "getServiceDomain": {
+   "method": "get"
+  },
+  "getTelemetryDisabled": {
+   "method": "get"
+  },
+  "refreshServerIp": {
+   "method": "post"
+  },
+  "restartEasypanel": {
+   "method": "post"
+  },
+  "setDailyDockerCleanup": {
+   "method": "post"
+  },
+  "setGithubToken": {
+   "method": "post"
+  },
+  "setGoogleAnalyticsMeasurementId": {
+   "method": "post"
+  },
+  "setLetsEncryptEmail": {
+   "method": "post"
+  },
+  "setPanelDomain": {
+   "method": "post"
+  },
+  "setServiceDomain": {
+   "method": "post"
+  },
+  "setTelemetryDisabled": {
+   "method": "post"
+  },
+  "systemPrune": {
+   "method": "post"
+  },
+  "getSetupStatus": {
+   "method": "get"
+  },
+  "setup": {
+   "method": "post"
+  },
+  "listStorageProviders": {
+   "method": "get"
+  },
+  "listStorageProviderOptions": {
+   "method": "get"
+  },
+  "createDropboxProvider": {
+   "method": "post"
+  },
+  "deleteDropboxProvider": {
+   "method": "post"
+  },
+  "disconnectDropboxProvider": {
+   "method": "post"
+  },
+  "updateDropboxProvider": {
+   "method": "post"
+  },
+  "createFTProvider": {
+   "method": "post"
+  },
+  "deleteFTProvider": {
+   "method": "post"
+  },
+  "updateFTProvider": {
+   "method": "post"
+  },
+  "createGoogleProvider": {
+   "method": "post"
+  },
+  "deleteGoogleProvider": {
+   "method": "post"
+  },
+  "disconnectGoogleProvider": {
+   "method": "post"
+  },
+  "updateGoogleProvider": {
+   "method": "post"
+  },
+  "createLocalProvider": {
+   "method": "post"
+  },
+  "deleteLocalProvider": {
+   "method": "post"
+  },
+  "updateLocalProvider": {
+   "method": "post"
+  },
+  "createS3Provider": {
+   "method": "post"
+  },
+  "deleteS3Provider": {
+   "method": "post"
+  },
+  "updateS3Provider": {
+   "method": "post"
+  },
+  "createSFTProvider": {
+   "method": "post"
+  },
+  "deleteSFTProvider": {
+   "method": "post"
+  },
+  "updateSFTProvider": {
+   "method": "post"
+  },
+  "onInvalidateActions": {
+   "method": "get"
+  },
+  "createFromSchema": {
+   "method": "post"
+  },
+  "getCustomConfig": {
+   "method": "get"
+  },
+  "getDashboard": {
+   "method": "post"
+  },
+  "getEnv": {
+   "method": "get"
+  },
+  "restart": {
+   "method": "post"
+  },
+  "setCustomConfig": {
+   "method": "post"
+  },
+  "setEnv": {
+   "method": "post"
+  },
+  "configure": {
+   "method": "post"
+  },
+  "disable": {
+   "method": "post"
+  },
+  "enable": {
+   "method": "post"
+  },
+  "getUpdateStatus": {
+   "method": "get"
+  },
+  "update": {
+   "method": "post"
+  },
+  "createUser": {
+   "method": "post"
+  },
+  "destroyUser": {
+   "method": "post"
+  },
+  "generateApiToken": {
+   "method": "post"
+  },
+  "listUsers": {
+   "method": "get"
+  },
+  "revokeApiToken": {
+   "method": "post"
+  },
+  "updateUser": {
+   "method": "post"
+  },
+  "createVolumeBackup": {
+   "method": "post"
+  },
+  "destroyVolumeBackup": {
+   "method": "post"
+  },
+  "listVolumeBackups": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "listVolumeMounts": {
+   "method": "get",
+   "params": {
+    "projectName": "string",
+    "serviceName": "string"
+   }
+  },
+  "runVolumeBackup": {
+   "method": "post"
+  },
+  "updateVolumeBackup": {
+   "method": "post"
+  }
+ }
+}

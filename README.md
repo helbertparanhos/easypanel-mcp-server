@@ -30,22 +30,46 @@
 
 Instead of switching between your editor and the Easypanel dashboard, you control everything from inside Claude: deploy from GitHub, update env vars, read live logs, exec into containers, manage domains, databases, volumes and ports, set resource limits, run Docker maintenance and monitor your server — all in natural language.
 
-It maps the Easypanel API to **57 typed tools** across 15 categories, plus a single `trpc_raw` escape hatch that reaches **any** of Easypanel's ~350 procedures (40+ namespaces) for everything not covered by a dedicated tool. It speaks **both API generations** — the tRPC API of panels ≤ 2.30 and the new RPC layer introduced in Easypanel 2.31 — auto-detecting which one your panel uses. Every destructive action is gated behind an explicit confirmation, every response opens with a context banner so Claude always knows what it is touching, and an optional read-only mode lets you connect safely to a production panel.
+It maps the Easypanel API to **57 typed tools** across 15 categories, plus a single `easypanel_raw` escape hatch that reaches **any** of Easypanel's ~375 API operations for everything not covered by a dedicated tool. It speaks **all three API generations** — the tRPC API of panels ≤ 2.30, the RPC layer of 2.31–2.32, and the **public API introduced in Easypanel 2.33** — auto-detecting which one your panel uses. Every destructive action is gated behind an explicit confirmation, every response opens with a context banner so Claude always knows what it is touching, and an optional read-only mode lets you connect safely to a production panel.
 
-📖 API reference: [`docs/easypanel-api.md`](docs/easypanel-api.md) — architecture, the 43 namespaces, confirmed procedures mapped tool-by-tool, and how to discover new ones.
+📖 API reference: [`docs/easypanel-api.md`](docs/easypanel-api.md) — architecture, the API generations, confirmed operations mapped tool-by-tool, and how to discover new ones.
 
 ---
 
 ## Compatibility
 
-**Easypanel 2.31 replaced its internal tRPC API** with a new RPC layer (`/api/rpc/*`, OpenAPI at `/api/openapi.json`). On panels ≥ 2.31, every v1.x call that carries parameters fails with `400 Input validation failed`.
+Easypanel changed its API twice in quick succession:
+
+- **2.31** replaced the internal tRPC API with an RPC layer (`/api/rpc/*`). On panels ≥ 2.31, every v1.x call that carries parameters fails with `400 Input validation failed`.
+- **2.33** shipped a **documented public API** (`/api/<operation>`, GET for reads, POST for writes) and stated that the old internal API *"may change without notice and should not be relied upon"*. v3 targets the public API on those panels.
 
 | Your Easypanel version | Use |
 |---|---|
-| **any** (recommended) | `easypanel-mcp-server@latest` (**v2.x**) — auto-detects the panel's API generation, works on both |
+| **any** (recommended) | `easypanel-mcp-server@latest` (**v3.x**) — auto-detects the generation, works on all three |
 | **≤ 2.30.x** only, pinned | `easypanel-mcp-server@legacy` (**v1.3.x**) — frozen tRPC-only line, last validated against v2.30.1 |
 
-v2.x detects the generation with a single probe request on first call (cached). To skip detection, set `EASYPANEL_API_FLAVOR=trpc` (≤ 2.30) or `EASYPANEL_API_FLAVOR=rpc` (≥ 2.31).
+v3 detects the generation with a single probe request on first call (cached) and logs the panel version to stderr. To skip detection, set `EASYPANEL_API_FLAVOR` to `trpc` (≤ 2.30), `rpc` (2.31–2.32) or `public` (≥ 2.33).
+
+> **Upgrading from v2?** If you pinned `EASYPANEL_API_FLAVOR=rpc` to work around the 2.32 issues, **remove it** — otherwise the client stays on the internal API that Easypanel now declares unstable.
+
+### This MCP vs. Easypanel's built-in MCP
+
+Easypanel 2.33 also ships its own MCP endpoint (`/api/mcp`, connection details next to your API key). It's a thin wrapper over the public API. This server is a different trade-off:
+
+| | Easypanel built-in MCP | easypanel-mcp-server |
+|---|---|---|
+| Runtime container logs | — | ✅ via `/ws/serviceLogs` (no Loki/licence needed) |
+| Exec inside a container | — | ✅ `exec_in_container` with destructive-command gate |
+| Live Docker events | — | ✅ `get_docker_events` |
+| Read-only mode | — | ✅ `MCP_ACCESS_MODE=readonly` blocks every write at the source |
+| Confirmation gate on destructive ops | — | ✅ `confirm: "CONFIRMO"` |
+| Secret redaction (`list_users`) | — | ✅ strips `apiToken` / `twoFactorSecret` |
+| Env var read-modify-write | — | ✅ never clobbers other variables |
+| Connection-string building | — | ✅ `inspect_database` |
+| Coverage of every API operation | ✅ | ✅ via `easypanel_raw` |
+| Zero install | ✅ | needs npx/node |
+
+Using both at once is fine — they don't conflict.
 
 ---
 
@@ -132,9 +156,9 @@ Then your `.cursor/mcp.json` uses references that apply automatically to every p
 |----------|----------|---------|-------------|
 | `EASYPANEL_URL` | ✅ | — | Panel URL, no trailing slash (e.g. `https://panel.example.com`) |
 | `EASYPANEL_TOKEN` | ✅ | — | API token (Easypanel → Settings → API → Generate Token) |
-| `MCP_ACCESS_MODE` | — | `full` | Set to `readonly` to block **all** writes (curated tools **and** `trpc_raw`). Reads stay available — ideal for connecting to a production panel for inspection only. |
-| `EASYPANEL_API_FLAVOR` | — | _(auto)_ | Force the panel's API generation instead of auto-detecting: `trpc` (≤ 2.30) or `rpc` (≥ 2.31). Aliases: `legacy` / `modern`. |
-| `EASYPANEL_RAW_DISABLED` | — | _(enabled)_ | Set to `1` to fully disable the `trpc_raw` escape hatch. Recommended when the MCP is exposed to untrusted content (prompt-injection risk), since `trpc_raw` reads can return secrets and are **not** covered by read-only mode. |
+| `MCP_ACCESS_MODE` | — | `full` | Set to `readonly` to block **all** writes (curated tools **and** `easypanel_raw`). Reads stay available — ideal for connecting to a production panel for inspection only. |
+| `EASYPANEL_API_FLAVOR` | — | _(auto)_ | Force the panel's API generation instead of auto-detecting: `trpc` (≤ 2.30), `rpc` (2.31–2.32) or `public` (≥ 2.33). Aliases: `legacy` / `modern`. Leave unset unless you have a reason — a stale `rpc` pin keeps a 2.33 panel on the internal API. |
+| `EASYPANEL_RAW_DISABLED` | — | _(enabled)_ | Set to `1` to fully disable the `easypanel_raw` escape hatch. Recommended when the MCP is exposed to untrusted content (prompt-injection risk), since `easypanel_raw` reads can return secrets and are **not** covered by read-only mode. |
 
 ---
 
@@ -166,7 +190,7 @@ No folder copying needed — one MCP install serves all your projects.
 
 > **"My disk is full"** — Claude runs `get_storage_stats`, then `cleanup_docker_images` or `prune_docker` (with confirmation) to reclaim space.
 
-> **"Show me the Traefik dashboard config"** — for anything without a dedicated tool, Claude uses `trpc_raw` to call the procedure directly.
+> **"Show me the Traefik dashboard config"** — for anything without a dedicated tool, Claude uses `easypanel_raw` to call the procedure directly.
 
 ---
 
@@ -188,29 +212,35 @@ No folder copying needed — one MCP install serves all your projects.
 | **Monitoring** | `get_docker_stats`, `get_storage_stats`, `get_service_stats` |
 | **Maintenance** | `prune_docker` ⚠️, `cleanup_docker_images` |
 | **Server / Infra** | `list_users`, `list_certificates`, `list_nodes`, `restart_panel` ⚠️, `reboot_server` ⚠️ |
-| **Raw access** | `trpc_raw` ⚠️ |
+| **Raw access** | `easypanel_raw` ⚠️ |
 
-⚠️ = requires `confirm: "CONFIRMO"`. For `exec_in_container`, `create_mount`, `create_port` and `trpc_raw` the confirmation is **conditional** (only for destructive commands, sensitive host-path bind mounts, privileged ports `< 1024`, and write mutations respectively).
+⚠️ = requires `confirm: "CONFIRMO"`. For `exec_in_container`, `create_mount`, `create_port` and `easypanel_raw` the confirmation is **conditional** (only for destructive commands, sensitive host-path bind mounts, privileged ports `< 1024`, and writes respectively).
 
-Full tool descriptions with parameters are in [`llms.txt`](llms.txt). For the underlying API (both generations), see [`docs/easypanel-api.md`](docs/easypanel-api.md).
+Full tool descriptions with parameters are in [`llms.txt`](llms.txt). For the underlying API (all generations), see [`docs/easypanel-api.md`](docs/easypanel-api.md).
 
-### `trpc_raw` — reach any of the ~350 procedures
+### `easypanel_raw` — reach any of the ~375 operations
 
-Covering every Easypanel procedure with a typed tool isn't practical, so anything without a dedicated tool is reachable directly:
+Covering every Easypanel operation with a typed tool isn't practical, so anything without a dedicated tool is reachable directly:
 
 ```jsonc
-// read (default)
+// read (default) — flat name, as documented in your panel's /api/openapi.json
+{ "procedure": "listCertificates" }
+{ "procedure": "getPanelDomain" }
+{ "procedure": "listVolumeBackups", "input": { "projectName": "app", "serviceName": "api" } }
+
+// the old dot notation still works and is translated
 { "procedure": "certificates.listCertificates" }
-{ "procedure": "traefik.getDashboard" }
 
 // write — requires isMutation:true AND confirm:"CONFIRMO"
-{ "procedure": "branding.updateSettings", "input": { /* ... */ },
+{ "procedure": "setLogoSettings", "input": { /* ... */ },
   "isMutation": true, "confirm": "CONFIRMO" }
 ```
 
-Useful namespaces only reachable via `trpc_raw`: `traefik.*`, `branding.*`, `cloudflareTunnel.*`, `box.*`, `middlewares.*`, `notifications.*`, `volumeBackups.*`, `databaseBackups.*`, `wordpress.*`, `git.*`, `update.*`.
+Areas only reachable via `easypanel_raw`: Traefik, branding, Cloudflare Tunnel, Box, middlewares, notifications, volume/database backups, WordPress, storage providers, Docker builders, Git keys, cluster and update management. To discover names, read `GET <your-panel>/api/openapi.json`.
 
-Procedure names use dot notation on both API generations — the client translates to the right transport. On panels ≥ 2.31 the client also classifies the procedure against the panel's own OpenAPI spec, fail-closed: a `trpc_raw` read only executes if the procedure comes back as a query, so writes can't sneak past the `readonly` mode or the confirmation gate. On 2.31 that classification is the documented HTTP method; on 2.32+, where the spec is POST-only and no longer carries it, the client falls back to the panel's naming convention (`get`/`list`/`inspect`/`check`/`query`/`search` = read, anything else = write), restricted to procedures present in the spec.
+The client classifies each operation against the panel's own OpenAPI spec, **fail-closed**: a read only executes if the spec says it's a read, so writes can't sneak past `readonly` mode or the confirmation gate — and the reverse is caught too (calling a read with `isMutation:true` is refused with a clear message). On **2.33+ that classification is exact**, since the public API declares GET for reads and POST for writes. On 2.31 it's the documented HTTP method; on 2.32, where the spec is POST-only and carries no such marker, the client falls back to the panel's naming convention (`get`/`list`/`inspect`/`check`/`query`/`search` = read, anything else = write), restricted to operations present in the spec.
+
+> One deliberate exception: on 2.33+ the panel validates query params **without type coercion**, so `?limit=5` arrives as the string `"5"` and is rejected. Whenever an input carries a non-string value, the client routes that read through the internal `/api/rpc` transport (which sends JSON in the body) and logs the reason to stderr. The read/write classification still comes from the spec first, so the guard is unaffected.
 
 ---
 
@@ -239,10 +269,10 @@ Destructive or production-impacting actions return `BLOQUEADO` until they receiv
 This gates project/service deletion, stop/rename, env/domain removal, database destruction, the global server ops (`prune_docker`, `restart_panel`, `reboot_server`), and — conditionally — dangerous container commands, sensitive bind mounts, privileged ports and raw mutations.
 
 ### Read-only mode
-Set `MCP_ACCESS_MODE=readonly` to block **every** write at the source (`client.mutate`), covering both curated tools and `trpc_raw`. Reads remain available — perfect for a production panel you only want to inspect.
+Set `MCP_ACCESS_MODE=readonly` to block **every** write at the source (`client.mutate`), covering both curated tools and `easypanel_raw`. Reads remain available — perfect for a production panel you only want to inspect.
 
 ### Raw escape-hatch controls
-`trpc_raw` validates the procedure name (`namespace.procedure`, no path/query injection), requires the `input` to be an object (≤ 50KB), and demands `CONFIRMO` for any mutation. Set `EASYPANEL_RAW_DISABLED=1` to turn it off entirely.
+`easypanel_raw` validates the operation name (flat or `namespace.procedure`, no path/query injection), requires the `input` to be an object (≤ 50KB), and demands `CONFIRMO` for any mutation. Set `EASYPANEL_RAW_DISABLED=1` to turn it off entirely.
 
 ### Secret redaction
 `list_users` strips `apiToken`, `twoFactorSecret` and password fields before returning — only `id`, `email`, `admin`, `twoFactorEnabled` and `createdAt` reach the model.
@@ -286,8 +316,8 @@ The Easypanel panel talks to its backend over **tRPC** (`/api/trpc/<router>.<pro
 
 ## Known limitations
 
-- **WordPress / Box service types** — not exposed as dedicated tools; reach them via `trpc_raw` (e.g. `wordpress.inspectService`, `box.createService`).
-- **`trpc_raw` reads bypass read-only mode** — read-only blocks writes only. A raw read can return sensitive data; use `EASYPANEL_RAW_DISABLED=1` in untrusted environments.
+- **WordPress / Box service types** — not exposed as dedicated tools; reach them via `easypanel_raw` (e.g. `inspectWordPressService`, `createBoxService`).
+- **`easypanel_raw` reads bypass read-only mode** — read-only blocks writes only. A raw read can return sensitive data; use `EASYPANEL_RAW_DISABLED=1` in untrusted environments.
 - **Cluster tools** — `list_nodes` returns the local node only on single-server setups (no Swarm cluster).
 - **Docker events** are real-time only (no history) — an idle server may return an empty window.
 
@@ -308,7 +338,7 @@ Opens a browser UI where you can call any tool manually and inspect the response
 | Feature | easypanel-mcp-server | easypanel-mcp (sitp2k) |
 |---------|---------------------|----------------------|
 | Curated tools | **57** | ~15 |
-| Raw access to all ~347 procedures | ✅ (`trpc_raw`) | ❌ |
+| Raw access to all ~375 API operations | ✅ (`easypanel_raw`) | ❌ |
 | Auth method | Bearer token | Email + password |
 | Confirmation guard | ✅ | ❌ |
 | Read-only mode | ✅ | ❌ |

@@ -47,7 +47,10 @@ const mountToolNames = new Set(mountTools.map((t) => t.name));
 const portToolNames = new Set(portTools.map((t) => t.name));
 const composeToolNames = new Set(composeTools.map((t) => t.name));
 const serverToolNames = new Set(serverTools.map((t) => t.name));
-const rawToolNames = new Set(rawTools.map((t) => t.name));
+// `trpc_raw` foi o nome do escape hatch até a v2. Ele sai da lista anunciada em
+// `tools/list` (a API não é mais tRPC), mas segue roteado aqui para não quebrar
+// skills, prompts e scripts salvos que ainda o chamam pelo nome antigo.
+const rawToolNames = new Set([...rawTools.map((t) => t.name), "trpc_raw"]);
 
 export async function handleTool(name: string, args: Record<string, unknown>) {
   if (projectToolNames.has(name)) return handleProjectTool(name, args);

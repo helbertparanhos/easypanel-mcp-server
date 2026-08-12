@@ -1,23 +1,30 @@
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { isReadOnly } from "./context.js";
+import { publicNameFor, internalNameFor } from "./procedures.js";
 
 /**
  * Geração da API do painel:
- *  - "trpc" — Easypanel ≤ 2.30: tRPC clássico. Queries via GET `?input={"json":...}`,
+ *  - "trpc"   — Easypanel ≤ 2.30: tRPC clássico. Queries via GET `?input={"json":...}`,
  *    mutations via POST; resposta embrulhada em `{ result: { data: { json } } }`.
- *  - "rpc"  — Easypanel ≥ 2.31: camada RPC nova (estilo oRPC) em `/api/rpc/*`, com
- *    OpenAPI em `/api/openapi.json`. O GET documentado com query params não aceita
- *    input na prática (400) — o caminho confiável é POST `{"json": input}` para
- *    QUALQUER procedure (leitura e escrita); resposta vem como `{ "json": dado }`.
+ *  - "rpc"    — Easypanel 2.31–2.32: camada RPC (estilo oRPC) em `/api/rpc/*`. O GET
+ *    documentado com query params não aceita input na prática (400) — o caminho
+ *    confiável é POST `{"json": input}` para QUALQUER procedure (leitura e escrita);
+ *    resposta vem como `{ "json": dado }`.
+ *  - "public" — Easypanel ≥ 2.33: API pública documentada. Cada procedure é um path
+ *    achatado em `/api/<nome>`, com GET para leitura e POST (body JSON puro) para
+ *    escrita, e a resposta é o dado CRU, sem envelope. É a superfície que o
+ *    Easypanel se comprometeu a manter estável — a interna segue viva, mas o
+ *    changelog do 2.33 avisa que "may change without notice".
  */
-export type ApiFlavor = "trpc" | "rpc";
+export type ApiFlavor = "trpc" | "rpc" | "public";
 
 /** Override manual da geração da API via env (pula a auto-detecção). */
 export function flavorFromEnv(): ApiFlavor | null {
   const v = (process.env.EASYPANEL_API_FLAVOR || "").toLowerCase();
   if (v === "trpc" || v === "legacy") return "trpc";
   if (v === "rpc" || v === "modern") return "rpc";
+  if (v === "public") return "public";
   return null;
 }
 
@@ -25,6 +32,10 @@ export function flavorFromEnv(): ApiFlavor | null {
  * Identifica a geração da API pela forma do corpo de resposta. Cada geração
  * responde com a própria forma até em erros de auth, então a detecção funciona
  * mesmo com token inválido (e o erro real aparece na primeira chamada de verdade).
+ *
+ * ⚠️ Só distingue trpc de rpc. O 2.33 responde `{"json":...}` em `/api/trpc/*`
+ * também (as rotas antigas continuam vivas) — por isso a detecção do "public"
+ * acontece ANTES, por rota exclusiva, e não por forma de corpo.
  */
 export function flavorFromBody(data: unknown): ApiFlavor | null {
   if (!data || typeof data !== "object") return null;
@@ -54,8 +65,9 @@ const READ_VERBS = new Set(["get", "list", "inspect", "check", "query", "search"
 
 /**
  * Classifica pela convenção de nomes (`services.app.inspectService` → query).
- * Só é usada quando o OpenAPI do painel não carrega mais a distinção (2.32+);
- * o chamador restringe o uso a procedures que existem no spec.
+ * Só é usada no flavor "rpc" (2.32), onde o OpenAPI do painel deixou de carregar a
+ * distinção; o chamador restringe o uso a procedures que existem no spec.
+ * No flavor "public" ela não é necessária — o método HTTP do spec é exato.
  */
 export function procKindFromName(procedure: string): ProcKind {
   const leaf = procedure.split(".").pop() ?? "";
@@ -64,14 +76,14 @@ export function procKindFromName(procedure: string): ProcKind {
 }
 
 /**
- * Monta o mapa procedure (minúscula) → natureza a partir do OpenAPI do painel.
- * Duas formas de spec no mundo real:
+ * Monta o mapa procedure (minúscula) → natureza a partir do OpenAPI de painéis
+ * 2.31–2.32. Duas formas de spec no mundo real:
  *  - 2.31: paths já em `/api/rpc/*`, queries documentadas em GET → o método HTTP
  *    dá a distinção (GET = query, só-POST = mutation).
- *  - 2.32+: prefixo migrou para `servers[].url` e os paths ficaram nus
+ *  - 2.32: prefixo migrou para `servers[].url` e os paths ficaram nus
  *    (`/projects/listProjects`); TUDO virou POST e o spec deixou de carregar
- *    qualquer marca de leitura/escrita (sem `x-*`, sem GET) → cai na convenção
- *    de nomes, ainda restrita às procedures presentes no spec.
+ *    qualquer marca de leitura/escrita → cai na convenção de nomes, ainda
+ *    restrita às procedures presentes no spec.
  * O nome sai do `operationId` (já é `ns.proc`), com o path como reserva.
  */
 export function kindMapFromSpec(spec: any): Map<string, ProcKind> | null {
@@ -92,7 +104,7 @@ export function kindMapFromSpec(spec: any): Map<string, ProcKind> | null {
       proc = opId;
     } else {
       // Reserva: reconstrói do path. O prefixo pode já estar no path (2.31) ou
-      // vir de `servers` (2.32+) — normaliza as duas antes de exigir /api/rpc/.
+      // vir de `servers` (2.32) — normaliza as duas antes de exigir /api/rpc/.
       const full = p.startsWith("/api/rpc/") ? p : base + p;
       if (!full.startsWith("/api/rpc/")) continue;
       proc = full.slice("/api/rpc/".length).split("/").join(".");
@@ -111,10 +123,69 @@ export function kindMapFromSpec(spec: any): Map<string, ProcKind> | null {
         : "mutation"
       : procKindFromName(proc);
     // Chave em minúsculas: o lookup também normaliza, para o guard não ser
-    // contornável por variação de caixa (a regex do trpc_raw aceita A-Z).
+    // contornável por variação de caixa (a regex do raw aceita A-Z).
     map.set(proc.toLowerCase(), kind);
   }
   return map;
+}
+
+/** Uma operação da API pública (2.33+): método HTTP e, em GET, os tipos dos params. */
+export interface PublicOp {
+  method: "get" | "post";
+  /** Nome do query param → tipo declarado no schema (só para GET). */
+  params: Record<string, string>;
+}
+
+/**
+ * Indexa o OpenAPI da API pública (2.33+): `/api/<nome>` → método e params.
+ *
+ * Reconhece o formato pelo que ele é: paths de UM segmento, sem o prefixo
+ * `/api/rpc/` das gerações anteriores. Devolve `null` se o spec não tiver essa
+ * cara — assim um painel 2.31/2.32 nunca é lido como público por engano.
+ */
+export function publicIndexFromSpec(spec: any): Map<string, PublicOp> | null {
+  const paths = spec?.paths;
+  if (!paths || typeof paths !== "object") return null;
+
+  const index = new Map<string, PublicOp>();
+  for (const [p, ops] of Object.entries<any>(paths)) {
+    if (!ops || typeof ops !== "object") continue;
+    // Path achatado de um segmento só: "/inspectAppService".
+    const m = /^\/([a-zA-Z][a-zA-Z0-9_]*)$/.exec(p);
+    if (!m) continue;
+    const method = ops.get ? "get" : ops.post ? "post" : null;
+    if (!method) continue;
+    const params: Record<string, string> = {};
+    if (method === "get") {
+      for (const pa of ops.get.parameters ?? []) {
+        if (pa?.name) params[pa.name] = pa.schema?.type ?? "unknown";
+      }
+    }
+    index.set(m[1], { method, params });
+  }
+  return index.size > 0 ? index : null;
+}
+
+/**
+ * Serializa o input como query string da API pública. Devolve `null` quando
+ * algum valor NÃO é string.
+ *
+ * Não é preciosismo: o painel 2.33 valida os query params com zod SEM coerção —
+ * `?limit=5` chega como `"5"` e é rejeitado com "Expected number, received
+ * string". Não há codificação que resolva (testado com `limit=5` e `limit[]=5`).
+ * Quando isso acontece o chamador cai no transporte RPC interno, que carrega o
+ * input como JSON no body e preserva os tipos.
+ */
+export function toQueryParams(input: unknown): URLSearchParams | null {
+  if (input === undefined || input === null) return new URLSearchParams();
+  if (typeof input !== "object" || Array.isArray(input)) return null;
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (v === undefined) continue; // campo opcional não informado
+    if (typeof v !== "string") return null;
+    params.set(k, v);
+  }
+  return params;
 }
 
 /**
@@ -130,7 +201,29 @@ export function safeServerMessage(msg: unknown): string | null {
   return oneLine.length > 300 ? oneLine.slice(0, 300) + "…" : oneLine;
 }
 
-/** Desembrulha o payload nas duas formas de resposta (tRPC legado e RPC 2.31+). */
+/**
+ * Extrai a mensagem de erro das três gerações, incluindo os `zodErrors` de
+ * validação que a API pública devolve por campo:
+ *   { code:"BAD_REQUEST", message:"Input validation failed",
+ *     data:{ zodErrors:{ projectName:"Required" } } }
+ * Sem isso o agente só vê "Input validation failed" e não sabe o que corrigir.
+ */
+export function errorMessageFromBody(data: any): string | null {
+  const base = safeServerMessage(
+    data?.message ?? data?.json?.message ?? data?.error?.json?.message ?? data?.error?.message
+  );
+  const zod = data?.data?.zodErrors;
+  if (zod && typeof zod === "object" && !Array.isArray(zod)) {
+    const fields = Object.entries(zod)
+      .slice(0, 8)
+      .map(([field, msg]) => `${field}: ${safeServerMessage(msg) ?? "inválido"}`)
+      .join("; ");
+    if (fields) return base ? `${base} (${fields})` : fields;
+  }
+  return base;
+}
+
+/** Desembrulha o payload das gerações com envelope (tRPC legado e RPC 2.31–2.32). */
 export function unwrapBody(data: any): unknown {
   if (data && typeof data === "object") {
     if ("result" in data) return data.result?.data?.json ?? data.result?.data ?? data.result;
@@ -145,7 +238,11 @@ export class EasyPanelClient {
   private flavorCache: ApiFlavor | null = null;
   private kindMap: Map<string, ProcKind> | null = null;
   private kindMapInFlight: Promise<Map<string, ProcKind> | null> | null = null;
+  private publicIndex: Map<string, PublicOp> | null = null;
+  private publicIndexInFlight: Promise<Map<string, PublicOp> | null> | null = null;
   private flavorInFlight: Promise<ApiFlavor> | null = null;
+  /** Versão do painel, capturada na detecção — só para diagnóstico/log. */
+  private panelVersion: string | null = null;
 
   constructor() {
     const url = process.env.EASYPANEL_URL;
@@ -163,7 +260,7 @@ export class EasyPanelClient {
     };
   }
 
-  /** Geração da API em uso: override por env > cache > auto-detecção (1 request). */
+  /** Geração da API em uso: override por env > cache > auto-detecção. */
   private async getFlavor(): Promise<ApiFlavor> {
     const forced = flavorFromEnv();
     if (forced) return forced;
@@ -182,8 +279,27 @@ export class EasyPanelClient {
   }
 
   private async detectFlavor(): Promise<ApiFlavor> {
-    // `update.getStatus` é uma query sem input que existe nas duas gerações —
-    // a forma do corpo de resposta entrega qual delas o painel fala.
+    // ORDEM IMPORTA. O 2.33 mantém `/api/trpc/*` e `/api/rpc/*` vivos respondendo
+    // `{"json":...}` — sondar a rota antiga primeiro classificaria um painel 2.33
+    // como "rpc". `GET /api/getUpdateStatus` só existe na API pública (2.33+),
+    // é leitura sem input e ainda entrega a versão do painel de brinde.
+    try {
+      const res = await fetch(`${this.baseUrl}/api/getUpdateStatus`, { headers: this.headers() });
+      if (res.ok) {
+        const data = JSON.parse(await res.text());
+        if (data && typeof data === "object" && !("json" in data) && "version" in data) {
+          this.panelVersion = typeof data.version === "string" ? data.version : null;
+          process.stderr.write(
+            `[easypanel-mcp] painel ${this.panelVersion ?? "?"} — usando a API pública (/api/<procedure>).\n`
+          );
+          return "public";
+        }
+      }
+    } catch {
+      /* painel antigo ou corpo não-JSON — segue para as sondas legadas */
+    }
+    // `update.getStatus` é uma query sem input que existe nas gerações antigas —
+    // a forma do corpo entrega qual delas o painel fala.
     try {
       const res = await fetch(`${this.baseUrl}/api/trpc/update.getStatus`, {
         headers: this.headers(),
@@ -203,19 +319,54 @@ export class EasyPanelClient {
     }
     throw new McpError(
       ErrorCode.InternalError,
-      "Não foi possível detectar a geração da API do Easypanel (tRPC ≤ 2.30 vs RPC ≥ 2.31). " +
-        "Verifique EASYPANEL_URL/EASYPANEL_TOKEN ou force com EASYPANEL_API_FLAVOR=trpc|rpc."
+      "Não foi possível detectar a geração da API do Easypanel (tRPC ≤ 2.30, RPC 2.31–2.32, pública ≥ 2.33). " +
+        "Verifique EASYPANEL_URL/EASYPANEL_TOKEN ou force com EASYPANEL_API_FLAVOR=trpc|rpc|public."
     );
   }
 
+  /** Painéis ≥ 2.33 têm start/stop/restart de compose documentados na API pública. */
+  async supportsComposeLifecycle(): Promise<boolean> {
+    return (await this.getFlavor()) === "public";
+  }
+
   /**
-   * Mapa procedure (minúscula) → leitura/escrita, construído do OpenAPI do próprio
-   * painel (`/api/openapi.json`, disponível a partir do 2.31). No modo "rpc" TODAS
-   * as chamadas vão por POST, então o método HTTP não separa mais leitura de
-   * escrita — este mapa devolve essa separação: `query()` recusa procedures
-   * classificadas como mutation, preservando o contrato do readonly e o gate de
-   * confirmação do trpc_raw. Falhas NÃO são cacheadas (a próxima chamada tenta de
-   * novo) e chamadas concorrentes compartilham o fetch em voo.
+   * Índice do OpenAPI da API pública (2.33+). É ele que classifica leitura vs
+   * escrita de forma EXATA (método HTTP declarado), substituindo a heurística de
+   * nomes que o flavor "rpc" ainda precisa. Falhas não são cacheadas e chamadas
+   * concorrentes compartilham o fetch em voo.
+   */
+  private async getPublicIndex(): Promise<Map<string, PublicOp> | null> {
+    if (this.publicIndex) return this.publicIndex;
+    if (!this.publicIndexInFlight) {
+      this.publicIndexInFlight = this.loadPublicIndex().finally(() => {
+        this.publicIndexInFlight = null;
+      });
+    }
+    return this.publicIndexInFlight;
+  }
+
+  private async loadPublicIndex(): Promise<Map<string, PublicOp> | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/openapi.json`, { headers: this.headers() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const index = publicIndexFromSpec(JSON.parse(await res.text()));
+      if (!index) throw new Error("spec sem operações reconhecíveis");
+      this.publicIndex = index;
+      return index;
+    } catch (err) {
+      process.stderr.write(
+        `[easypanel-mcp] aviso: falha ao carregar /api/openapi.json (${(err as Error).message}); ` +
+          `leituras arbitrárias (easypanel_raw) ficam recusadas até o spec carregar.\n`
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Mapa procedure → leitura/escrita para painéis 2.31–2.32, construído do
+   * OpenAPI do próprio painel. Nessas versões TODAS as chamadas vão por POST,
+   * então o método HTTP não separa mais leitura de escrita — este mapa devolve
+   * essa separação.
    */
   private async getKindMap(): Promise<Map<string, ProcKind> | null> {
     if (this.kindMap) return this.kindMap;
@@ -238,20 +389,91 @@ export class EasyPanelClient {
     } catch (err) {
       process.stderr.write(
         `[easypanel-mcp] aviso: falha ao carregar /api/openapi.json (${(err as Error).message}); ` +
-          `leituras arbitrárias (trpc_raw) ficam recusadas até o spec carregar.\n`
+          `leituras arbitrárias (easypanel_raw) ficam recusadas até o spec carregar.\n`
       );
       return null;
     }
   }
 
+  /** Chamada de leitura pela API pública (2.33+), com fallback ao RPC interno. */
+  private async publicQuery<T>(
+    procedure: string,
+    input: unknown,
+    requireDocumentedQuery: boolean
+  ): Promise<T> {
+    const flat = publicNameFor(procedure);
+    const index = await this.getPublicIndex();
+    const op = flat ? index?.get(flat) : undefined;
+
+    if (op?.method === "post") {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `A procedure "${procedure}" é uma escrita na API do Easypanel — ` +
+          `chame-a como escrita (no easypanel_raw: isMutation:true + confirm).`
+      );
+    }
+    if (requireDocumentedQuery && op?.method !== "get") {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        index
+          ? `A procedure "${procedure}" não consta como leitura no OpenAPI do painel — ` +
+            `recusada por segurança (fail-closed). Se for uma escrita, use isMutation:true + confirm; ` +
+            `se acredita que é leitura, confira o nome em GET ${this.baseUrl}/api/openapi.json.`
+          : `Não foi possível carregar o OpenAPI do painel para classificar "${procedure}" — ` +
+            `leitura arbitrária recusada por segurança (fail-closed). Tente novamente ou use as tools dedicadas.`
+      );
+    }
+
+    // Procedure fora do spec público (ex.: o painel renomeou algo): as tools
+    // curadas ainda funcionam pelo transporte interno, que segue vivo no 2.33.
+    if (!flat || !op) return this.internalRpcCall<T>(procedure, input, "leitura fora do spec público");
+
+    const params = toQueryParams(input);
+    // Input com valor não-string não cabe na query string deste painel (zod sem
+    // coerção). A classificação já foi feita pelo spec acima, então cair no
+    // transporte interno aqui é seguro: sabemos que é leitura.
+    if (!params) return this.internalRpcCall<T>(procedure, input, "input com valor não-string");
+
+    const qs = params.toString();
+    const res = await fetch(`${this.baseUrl}/api/${flat}${qs ? `?${qs}` : ""}`, {
+      headers: this.headers(),
+    });
+    return this.parse<T>(res, flat, false);
+  }
+
   /**
-   * @param opts.requireDocumentedQuery Exigido pelo trpc_raw (procedures
-   *   arbitrárias): no modo rpc a chamada só prossegue se o OpenAPI do painel
-   *   classificar a procedure como query (fail-closed). Sem isso, uma falha ao
-   *   carregar o spec — ou uma procedure fora dele — permitiria executar
-   *   mutation "disfarçada" de leitura, contornando readonly e CONFIRMO.
-   *   Tools curadas não passam a flag: suas procedures de leitura são literais
-   *   verificados, e o guard fica como defense-in-depth.
+   * Transporte RPC interno (`/api/rpc/ns/proc`). No flavor "public" é a rota de
+   * escape para o que a API pública não consegue expressar; nos painéis
+   * 2.31–2.32 é o transporte principal.
+   */
+  private async internalRpcCall<T>(procedure: string, input: unknown, motivo: string): Promise<T> {
+    const internal = internalNameFor(procedure);
+    if (!internal) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `A procedure "${procedure}" não está no OpenAPI público do painel e não tem equivalente ` +
+          `interno conhecido. Confira o nome em GET ${this.baseUrl}/api/openapi.json.`
+      );
+    }
+    process.stderr.write(
+      `[easypanel-mcp] ${internal}: usando o transporte interno /api/rpc (motivo: ${motivo}).\n`
+    );
+    const res = await fetch(`${this.baseUrl}${rpcPath(internal)}`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ json: input ?? {} }),
+    });
+    return this.parse<T>(res, internal, true);
+  }
+
+  /**
+   * @param opts.requireDocumentedQuery Exigido pelo easypanel_raw (procedures
+   *   arbitrárias): a chamada só prossegue se o OpenAPI do painel classificar a
+   *   procedure como leitura (fail-closed). Sem isso, uma falha ao carregar o
+   *   spec — ou uma procedure fora dele — permitiria executar escrita
+   *   "disfarçada" de leitura, contornando readonly e CONFIRMO. Tools curadas
+   *   não passam a flag: suas procedures de leitura são literais verificados, e
+   *   o guard fica como defense-in-depth.
    */
   async query<T>(
     procedure: string,
@@ -259,18 +481,20 @@ export class EasyPanelClient {
     opts: { requireDocumentedQuery?: boolean } = {}
   ): Promise<T> {
     const flavor = await this.getFlavor();
+    if (flavor === "public") {
+      return this.publicQuery<T>(procedure, input, Boolean(opts.requireDocumentedQuery));
+    }
     if (flavor === "rpc") {
-      // 2.31+: queries com input só funcionam via POST {"json": ...} (o GET
+      // 2.31–2.32: queries com input só funcionam via POST {"json": ...} (o GET
       // documentado responde 400). Como POST executa qualquer procedure, o guard
-      // abaixo impede que uma mutation passe por aqui "disfarçada" de leitura
-      // (ex.: trpc_raw com isMutation=false) — readonly e CONFIRMO continuam valendo.
+      // abaixo impede que uma mutation passe por aqui "disfarçada" de leitura.
       const map = await this.getKindMap();
       const kind = map?.get(procedure.toLowerCase());
       if (kind === "mutation") {
         throw new McpError(
           ErrorCode.InvalidRequest,
           `A procedure "${procedure}" é uma mutation (escrita) na API do Easypanel — ` +
-            `chame-a como escrita (no trpc_raw: isMutation:true + confirm).`
+            `chame-a como escrita (no easypanel_raw: isMutation:true + confirm).`
         );
       }
       if (opts.requireDocumentedQuery && kind !== "query") {
@@ -289,7 +513,7 @@ export class EasyPanelClient {
         headers: this.headers(),
         body: JSON.stringify({ json: input ?? {} }),
       });
-      return this.parse<T>(res, procedure);
+      return this.parse<T>(res, procedure, true);
     }
     // ≤ 2.30 (tRPC): GET com ?input={"json":...}
     let url = `${this.baseUrl}/api/trpc/${procedure}`;
@@ -297,13 +521,13 @@ export class EasyPanelClient {
       url += `?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
     }
     const res = await fetch(url, { headers: this.headers() });
-    return this.parse<T>(res, procedure);
+    return this.parse<T>(res, procedure, true);
   }
 
   async mutate<T>(procedure: string, input?: unknown): Promise<T> {
     // Kill-switch global de escrita. Com MCP_ACCESS_MODE=readonly toda mutation é
-    // bloqueada na origem — cobre as tools curadas E o trpc_raw, sem depender de
-    // cada handler lembrar de checar. Reads (query) continuam liberados.
+    // bloqueada na origem — cobre as tools curadas E o easypanel_raw, sem depender
+    // de cada handler lembrar de checar. Reads (query) continuam liberados.
     if (isReadOnly()) {
       throw new McpError(
         ErrorCode.InvalidRequest,
@@ -311,6 +535,29 @@ export class EasyPanelClient {
       );
     }
     const flavor = await this.getFlavor();
+
+    if (flavor === "public") {
+      const flat = publicNameFor(procedure);
+      const index = await this.getPublicIndex();
+      const op = flat ? index?.get(flat) : undefined;
+      if (op?.method === "get") {
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `A procedure "${procedure}" é uma leitura na API do Easypanel — ` +
+            `chame-a como leitura (no easypanel_raw: sem isMutation).`
+        );
+      }
+      if (!flat || !op) {
+        return this.internalRpcCall<T>(procedure, input, "escrita fora do spec público");
+      }
+      const res = await fetch(`${this.baseUrl}/api/${flat}`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(input ?? {}),
+      });
+      return this.parse<T>(res, flat, false);
+    }
+
     const url =
       flavor === "rpc"
         ? `${this.baseUrl}${rpcPath(procedure)}`
@@ -320,7 +567,7 @@ export class EasyPanelClient {
       headers: this.headers(),
       body: JSON.stringify({ json: input ?? {} }),
     });
-    return this.parse<T>(res, procedure);
+    return this.parse<T>(res, procedure, true);
   }
 
   /**
@@ -524,8 +771,19 @@ export class EasyPanelClient {
     });
   }
 
-  private async parse<T>(res: Response, procedure: string): Promise<T> {
+  /**
+   * @param wrapped `true` para as gerações com envelope (`{result:{data:{json}}}`
+   *   no tRPC, `{json}` no RPC). A API pública devolve o dado CRU — desembrulhar
+   *   ali corromperia qualquer resposta que por acaso tenha um campo `json` ou
+   *   `result`, e trataria um campo `error` de negócio como falha.
+   */
+  private async parse<T>(res: Response, procedure: string, wrapped: boolean): Promise<T> {
     const text = await res.text();
+
+    // Procedures que não retornam nada respondem 200 com corpo vazio (confirmado
+    // em `listNodes` no 2.33.1). JSON.parse("") lançaria — devolvemos null.
+    if (res.ok && text.trim() === "") return null as T;
+
     let data: any;
     try {
       data = JSON.parse(text);
@@ -541,26 +799,23 @@ export class EasyPanelClient {
     }
     if (!res.ok) {
       process.stderr.write(`[easypanel-mcp] ${res.status} [${procedure}]: ${text}\n`);
-      // Só a mensagem estruturada das duas gerações vai ao contexto do LLM
-      // (campo controlado pelo servidor, ex. "Service not found."), truncada —
+      // Só a mensagem estruturada (campo controlado pelo servidor, ex. "Service
+      // not found." ou os zodErrors por campo) vai ao contexto do LLM, truncada —
       // nunca o corpo cru.
-      const msg = safeServerMessage(
-        data?.json?.message ?? data?.error?.json?.message ?? data?.error?.message
-      );
+      const msg = errorMessageFromBody(data);
       throw new McpError(
         ErrorCode.InternalError,
         `Easypanel API error ${res.status} on [${procedure}]` + (msg ? `: ${msg}` : "")
       );
     }
-    // Erro-em-200 do tRPC legado. Only treat as error when there is no result —
-    // avoids false positives when business data contains an "error" field.
-    if (data?.error && !data?.result) {
-      const msg =
-        safeServerMessage(data.error?.json?.message ?? data.error?.message) ??
-        "Erro desconhecido";
+    // Erro-em-200 do tRPC legado. Só vale para as gerações com envelope, e só
+    // quando não há `result` — evita falso positivo quando o dado de negócio
+    // tem um campo "error".
+    if (wrapped && data?.error && !data?.result) {
+      const msg = errorMessageFromBody(data) ?? "Erro desconhecido";
       throw new McpError(ErrorCode.InternalError, `Easypanel [${procedure}]: ${msg}`);
     }
-    return unwrapBody(data) as T;
+    return (wrapped ? unwrapBody(data) : data) as T;
   }
 }
 

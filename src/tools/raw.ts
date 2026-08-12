@@ -4,32 +4,40 @@ import { guardDestructive, CONFIRM_KEYWORD } from "../context.js";
 
 /**
  * Escape hatch genérico: chama qualquer procedure da API do Easypanel que não tenha
- * uma tool curada dedicada. O Easypanel expõe ~350 procedures em 40+ namespaces;
- * cobrir todas com tools tipadas seria inviável, então este atalho dá acesso ao
- * restante (ex.: traefik.*, branding.*, cloudflareTunnel.*, box.*, backups.*).
- * O nome segue em notação de pontos ("namespace.procedure") nas duas gerações da
- * API — o client traduz para o caminho certo (tRPC ≤ 2.30 ou /api/rpc/ em 2.31+).
+ * uma tool curada dedicada. O Easypanel expõe ~375 operações; cobrir todas com
+ * tools tipadas seria inviável, então este atalho dá acesso ao restante (ex.:
+ * traefik.*, branding.*, cloudflareTunnel.*, box.*, wordpress.*, backups.*).
  *
- * Diferenças de segurança vs. o trpc_raw "cru" de outros MCPs:
- *  - O nome da procedure é validado (namespace.procedure) antes de ir para a URL.
+ * Aceita as DUAS formas de nome, e o client traduz para o transporte certo:
+ *  - achatada, como na API pública 2.33+ ("listCertificates", "getDashboard");
+ *  - em notação de pontos, como nas gerações antigas ("certificates.listCertificates").
+ *
+ * Diferenças de segurança vs. o raw "cru" de outros MCPs:
+ *  - O nome da procedure é validado antes de ir para a URL.
  *  - Mutations exigem isMutation=true E confirm:"CONFIRMO" — como elas pulam os
  *    guards específicos das tools curadas, a confirmação explícita é a rede de
  *    segurança mínima. Reads (isMutation=false) seguem livres.
+ *  - A natureza (leitura vs escrita) é conferida contra o OpenAPI do painel, e
+ *    em 2.33+ essa checagem é exata (método HTTP declarado no spec).
  *  - Em MCP_ACCESS_MODE=readonly, qualquer mutation é bloqueada no client.
  */
 
-// namespace(.sub)*.procedure — pelo menos um ponto; só letras/números nos segmentos.
-const PROCEDURE_RE = /^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)+$/;
+// "listCertificates" ou "certificates.listCertificates" — segmentos alfanuméricos
+// separados por ponto, com ou sem namespace.
+const PROCEDURE_RE = /^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)*$/;
 
-/** Valida o nome de uma procedure tRPC (`namespace.procedure`). Exportada p/ teste. */
+/**
+ * Valida o nome de uma procedure, nas duas formas (achatada da API pública 2.33+
+ * ou `namespace.procedure` das gerações antigas). Exportada p/ teste.
+ */
 export function isValidProcedureName(procedure: unknown): boolean {
   return typeof procedure === "string" && PROCEDURE_RE.test(procedure);
 }
 
 // Habilita o escape hatch. Em ambientes onde o MCP é exposto a conteúdo não
 // confiável (risco de prompt injection), defina EASYPANEL_RAW_DISABLED=1 para
-// desligar o trpc_raw por completo — readonly NÃO protege contra leituras, e o
-// trpc_raw pode ler qualquer procedure (ex.: inspectService de outro projeto
+// desligar o easypanel_raw por completo — readonly NÃO protege contra leituras, e o
+// easypanel_raw pode ler qualquer procedure (ex.: inspectService de outro projeto
 // devolve env vars com secrets). Lido a cada chamada para refletir runtime/testes.
 function isRawDisabled(): boolean {
   const v = (process.env.EASYPANEL_RAW_DISABLED || "").toLowerCase();
@@ -38,15 +46,15 @@ function isRawDisabled(): boolean {
 
 export const rawTools: Tool[] = [
   {
-    name: "trpc_raw",
-    description: `Chama diretamente qualquer procedure tRPC do Easypanel (~347 em 43 namespaces) não coberta pelas tools dedicadas. Use para recursos avançados: traefik.*, branding.*, cloudflareTunnel.*, box.*, mariadb.*, volumeBackups.*, databaseBackups.*, etc. Leitura (isMutation=false) é o padrão. ⚠️ Reads podem retornar dados sensíveis (env vars/secrets de qualquer projeto). Para escrita, passe isMutation:true E confirm:"${CONFIRM_KEYWORD}" — mutations arbitrárias pulam as proteções das tools curadas.`,
+    name: "easypanel_raw",
+    description: `Chama diretamente qualquer operação da API do Easypanel (~375) não coberta pelas tools dedicadas. Use para recursos avançados: Traefik, branding, Cloudflare Tunnel, Box, WordPress, backups de volume/banco, notificações, storage providers, etc. Leitura (isMutation=false) é o padrão. ⚠️ Reads podem retornar dados sensíveis (env vars/secrets de qualquer projeto). Para escrita, passe isMutation:true E confirm:"${CONFIRM_KEYWORD}" — escritas arbitrárias pulam as proteções das tools curadas. Para descobrir os nomes disponíveis, leia GET <painel>/api/openapi.json.`,
     inputSchema: {
       type: "object",
       properties: {
         procedure: {
           type: "string",
           description:
-            'Nome completo da procedure no formato "namespace.procedure", ex: "certificates.listCertificates", "traefik.getDashboard", "users.listUsers".',
+            'Nome da operação. Em painéis 2.33+ use o nome achatado da API pública, ex: "listCertificates", "getDashboard", "listVolumeBackups". A notação antiga com namespace ("certificates.listCertificates") também é aceita e traduzida.',
         },
         input: {
           type: "object",
@@ -56,7 +64,7 @@ export const rawTools: Tool[] = [
         isMutation: {
           type: "boolean",
           description:
-            "true para operações de escrita, false para leitura (padrão). Mutations exigem confirm. Em painéis 2.31+ o client valida contra o OpenAPI do painel e recusa mutations chamadas como leitura.",
+            "true para operações de escrita, false para leitura (padrão). Escritas exigem confirm. O client valida contra o OpenAPI do painel e recusa escrita chamada como leitura (e vice-versa).",
           default: false,
         },
         confirm: {
@@ -72,12 +80,16 @@ export const rawTools: Tool[] = [
 type Args = Record<string, unknown>;
 
 export async function handleRawTool(name: string, args: Args) {
-  if (name !== "trpc_raw") throw new Error(`Tool desconhecida: ${name}`);
+  // `trpc_raw` era o nome até a v2 e some da lista de tools na v3 — seguimos
+  // aceitando a chamada para não quebrar skills/prompts salvos que usam o antigo.
+  if (name !== "easypanel_raw" && name !== "trpc_raw") {
+    throw new Error(`Tool desconhecida: ${name}`);
+  }
 
   if (isRawDisabled()) {
     throw new McpError(
       ErrorCode.InvalidRequest,
-      "trpc_raw está desabilitado (EASYPANEL_RAW_DISABLED). Use as tools dedicadas."
+      "easypanel_raw está desabilitado (EASYPANEL_RAW_DISABLED). Use as tools dedicadas."
     );
   }
 
@@ -91,7 +103,8 @@ export async function handleRawTool(name: string, args: Args) {
   if (!isValidProcedureName(procedure)) {
     throw new McpError(
       ErrorCode.InvalidParams,
-      'procedure inválida. Use o formato "namespace.procedure" (apenas letras, números e pontos), ex: "users.listUsers".'
+      'procedure inválida. Use o nome da operação (apenas letras, números e pontos), ex: "listUsers" ' +
+        'na API pública 2.33+ ou "users.listUsers" na notação antiga.'
     );
   }
 
@@ -128,8 +141,8 @@ export async function handleRawTool(name: string, args: Args) {
   if (isMutation) {
     const blocked = guardDestructive(
       confirm,
-      "trpc_raw (mutation)",
-      `mutation arbitrária na API: ${procedure}`
+      "easypanel_raw (escrita)",
+      `escrita arbitrária na API: ${procedure}`
     );
     if (blocked) return { content: [{ type: "text" as const, text: blocked }] };
     const result = await client.mutate(procedure, input ?? {});

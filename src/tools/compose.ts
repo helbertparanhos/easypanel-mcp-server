@@ -6,7 +6,7 @@ export const composeTools: Tool[] = [
   {
     name: "create_compose",
     description:
-      "Cria um serviço do tipo Docker Compose em um projeto. Depois use set_compose_file (via trpc_raw) ou o painel para definir o docker-compose, e deploy_compose para subir.",
+      "Cria um serviço do tipo Docker Compose em um projeto. Depois use set_compose_file (via easypanel_raw) ou o painel para definir o docker-compose, e deploy_compose para subir.",
     inputSchema: {
       type: "object",
       properties: {

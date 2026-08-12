@@ -1,6 +1,6 @@
 {
   "name": "easypanel-mcp-server",
-  "version": "2.0.1",
+  "version": "3.0.0",
   "description": "MCP Server for Easypanel — full control of projects, services, deploys, env vars, logs, databases, volumes, ports, compose and server maintenance from Claude Code, Cursor and Claude Desktop. 57 tools + raw API access. Supports both API generations (Easypanel <= 2.30 tRPC and >= 2.31 RPC) with auto-detection.",
   "type": "module",
   "main": "dist/index.js",

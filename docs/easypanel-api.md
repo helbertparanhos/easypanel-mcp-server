@@ -1,50 +1,83 @@
-# Referência da API do Easypanel (tRPC ≤ 2.30 / RPC ≥ 2.31)
+# Referência da API do Easypanel (tRPC ≤ 2.30 / RPC 2.31–2.32 / pública ≥ 2.33)
 
-Documentação da API interna que este MCP consome. Esta referência existe para que
+Documentação da API que este MCP consome. Esta referência existe para que
 adicionar/auditar uma tool não dependa de engenharia reversa repetida.
 
-> ⚠️ É uma API **interna e não versionada** (a partir do 2.31 há OpenAPI publicado,
-> mas auto-gerado e sem garantia de estabilidade). Procedures podem mudar entre
-> versões do Easypanel. As confirmadas abaixo foram validadas em uso real; o resto
-> deve ser tratado como "provável" e verificado antes de depender em produção.
+> ⚠️ Até o 2.32 era uma API **interna e não versionada**. O **2.33 publicou uma API
+> pública documentada** e passou a avisar que a interna "may change without notice
+> and should not be relied upon" — por isso o MCP usa a pública quando ela existe.
+> As operações confirmadas abaixo foram validadas em uso real.
 
 ---
 
-## As duas gerações da API
+## As três gerações da API
 
-O **Easypanel 2.31** (jun/2026) substituiu o tRPC interno por uma camada RPC nova
-(estilo [oRPC](https://orpc.dev)). Os **nomes das procedures e os inputs não
-mudaram** — mudaram o transporte e a forma da resposta:
+O **Easypanel 2.31** (jun/2026) substituiu o tRPC interno por uma camada RPC
+(estilo [oRPC](https://orpc.dev)), mantendo nomes e inputs. O **2.33** (jul/2026)
+publicou por cima disso uma **API pública achatada**, onde cada procedure vira um
+path de um segmento e o método HTTP volta a separar leitura de escrita:
 
-| | **≤ 2.30 (tRPC)** | **≥ 2.31 (RPC novo)** |
-|---|---|---|
-| Base | `/api/trpc/<ns>.<proc>` | `/api/rpc/<ns>/<proc>` (o caminho antigo ainda responde) |
-| Query (leitura) | `GET ?input={"json":<params>}` (url-encoded) | **`POST` body `{"json": <params>}`** ¹ |
-| Mutation (escrita) | `POST` body `{"json": <params>}` | `POST` body `{"json": <params>}` |
-| Resposta (sucesso) | `{"result":{"data":{"json":<dado>}}}` | `{"json": <dado>}` |
-| Resposta (erro) | `{"error":{"json":{"message":...}}}` | HTTP ≠ 200 + `{"json":{"code":"BAD_REQUEST","status":400,"message":...}}` |
-| Documentação | nenhuma (engenharia reversa) | **OpenAPI em `GET /api/openapi.json`** (~373 endpoints, 48 namespaces) |
-| WebSockets `/ws/*` | iguais | **iguais** (sem mudança) |
+| | **≤ 2.30 (tRPC)** | **2.31–2.32 (RPC interno)** | **≥ 2.33 (pública)** |
+|---|---|---|---|
+| Base | `/api/trpc/<ns>.<proc>` | `/api/rpc/<ns>/<proc>` | **`/api/<operação>`** |
+| Leitura | `GET ?input={"json":<params>}` | **`POST` body `{"json": <params>}`** ¹ | **`GET ?param=valor`** ² |
+| Escrita | `POST` body `{"json": <params>}` | `POST` body `{"json": <params>}` | **`POST` body JSON puro** |
+| Resposta (sucesso) | `{"result":{"data":{"json":<dado>}}}` | `{"json": <dado>}` | **`<dado>` cru, sem envelope** ³ |
+| Resposta (erro) | `{"error":{"json":{"message":...}}}` | HTTP ≠ 200 + `{"json":{...,"message":...}}` | HTTP ≠ 200 + `{"code","status","message","data":{"zodErrors":{campo:msg}}}` |
+| Nome da procedure | `services.app.inspectService` | `services.app.inspectService` | **`inspectAppService`** (achatado) |
+| Documentação | nenhuma | OpenAPI em `/api/openapi.json` (paths `/api/rpc/*`) | OpenAPI em `/api/openapi.json` (**375 ops**, paths achatados) |
+| WebSockets `/ws/*` | iguais | iguais | **iguais** (sem mudança) |
 
-¹ O OpenAPI documenta queries como `GET` com query params, mas na prática (2.31.0)
-o GET com parâmetros responde `400 Input validation failed` — o caminho confiável,
-validado ao vivo, é `POST {"json": ...}` para **qualquer** procedure.
+¹ O OpenAPI do 2.31 documenta queries como `GET` com query params, mas na prática
+o GET com parâmetros responde `400 Input validation failed` — o caminho confiável
+é `POST {"json": ...}` para **qualquer** procedure.
 
-**Consequência de segurança:** no 2.31+ o método HTTP deixou de separar leitura de
-escrita (tudo é POST). Por isso o [`client.ts`](../src/client.ts) baixa o
-`/api/openapi.json` do próprio painel e monta um mapa procedure → método documentado:
-`query()` **recusa** procedures documentadas como mutation, preservando o contrato do
-`MCP_ACCESS_MODE=readonly` e o gate de `CONFIRMO` do `trpc_raw` (que no tRPC legado
-era garantido pelo próprio método HTTP). Para procedures **arbitrárias** (`trpc_raw`)
-o guard é **fail-closed**: spec indisponível ou procedure fora do spec → leitura
-recusada. O lookup é normalizado em minúsculas (sem bypass por variação de caixa).
+² ⚠️ A API pública valida query params com zod **sem coerção de tipo**: `?limit=5`
+chega como `"5"` e é rejeitado com `Expected number, received string`. Não há
+codificação que resolva (testado `limit=5` e `limit[]=5`). Atinge 5 das 103
+leituras (`listActions`, `queryServiceLogs`, `queryComposeServiceLogs`,
+`getMetricsServiceStats`, `getMetricsSystemStats`). Quando o input tem qualquer
+valor não-string, o client cai no transporte `/api/rpc`, que leva JSON no body.
+
+³ Procedures sem retorno respondem **200 com corpo vazio** (confirmado em
+`listNodes`) — `JSON.parse("")` lançaria, então o client devolve `null`.
+
+**Consequência de segurança:** no 2.31–2.32 o método HTTP deixou de separar leitura
+de escrita (tudo é POST), e o [`client.ts`](../src/client.ts) precisava do OpenAPI
+para classificar. **No 2.33 a separação volta a ser exata** (GET = leitura,
+POST = escrita, declarado no spec), então o guard do `easypanel_raw` deixa de
+depender de heurística de nomes nesses painéis. Nas duas direções: leitura chamada
+como escrita e escrita chamada como leitura são recusadas. Para operações
+**arbitrárias** o guard é **fail-closed**: spec indisponível ou operação fora do
+spec → leitura recusada.
+
+### Tradução de nomes
+
+O mapa interno → público vive em [`src/procedures.ts`](../src/procedures.ts) e é
+travado por teste contra um snapshot real do spec
+(`test/fixtures/easypanel-2.33-ops.json`). A conversão **não é mecânica**:
+
+| interno (≤ 2.32) | público (≥ 2.33) |
+|---|---|
+| `services.app.inspectService` | `inspectAppService` |
+| `services.compose.deployService` | `deployComposeService` |
+| `services.mongo.createService` | `createMongoDBService` |
+| `services.common.rename` | `renameService` |
+| `monitorOld.getSystemStats` | `getLegacyMonitorSystemStats` |
+| `update.getStatus` | `getUpdateStatus` |
 
 ### Auto-detecção no client
 
-O client detecta a geração com 1 request (`update.getStatus`, query sem input que
-existe nas duas) e cacheia o resultado: corpo com `result`/`error` → tRPC legado;
-corpo com `json` no topo → RPC 2.31+. Dá para forçar com
-`EASYPANEL_API_FLAVOR=trpc|rpc` (aliases: `legacy`|`modern`).
+O client detecta a geração com 1 request e cacheia o resultado. **A ordem importa**:
+o 2.33 mantém `/api/trpc/*` e `/api/rpc/*` vivos, respondendo `{"json":...}` — sondar
+as rotas antigas primeiro classificaria um painel 2.33 como `rpc`. Então:
+
+1. `GET /api/getUpdateStatus` — só existe na API pública. Responde `{version}` sem
+   envelope → **`public`** (e a versão do painel vai para o stderr).
+2. `GET /api/trpc/update.getStatus` — corpo com `result`/`error` → **`trpc`**;
+   corpo com `json` no topo → **`rpc`**.
+
+Dá para forçar com `EASYPANEL_API_FLAVOR=trpc|rpc|public` (aliases: `legacy`|`modern`).
 
 ---
 
@@ -54,7 +87,7 @@ corpo com `json` no topo → RPC 2.31+. Dá para forçar com
 - **Base URL:** `${EASYPANEL_URL}/api/trpc/`
 - **Auth:** header `Authorization: Bearer <EASYPANEL_TOKEN>`
   (Settings → API → Generate Token). Os endpoints WebSocket `/ws/*` são a exceção:
-  exigem o token na query string `?token=...`. **A auth é igual nas duas gerações.**
+  exigem o token na query string `?token=...`. **A auth é igual nas três gerações.**
 - **Queries (leitura):** `GET /api/trpc/<router>.<procedure>?input=<json-url-encoded>`
 - **Mutations (escrita):** `POST /api/trpc/<router>.<procedure>` com corpo `{"json": {...}}`
 
@@ -164,8 +197,10 @@ users            volumeBackups    wordpress
 > **Forma de resposta confirmada ao vivo** (v2.30.1):
 > `{ projects: [{ name, createdAt }], services: [{ projectName, name, type, ... }] }`,
 > com `type` ∈ `app | compose | postgres | mysql | mariadb | mongo | redis`.
-> ⚠️ Ainda não confirmados: eventuais `services.compose.start/stop/restartService`
-> (o MCP usa só `services.compose.deployService`, que é confirmada).
+> ✅ **Resolvido no 2.33:** `startComposeService`, `stopComposeService` e
+> `restartComposeService` existem na API pública e o MCP passou a usá-los. Em
+> painéis ≤ 2.32, onde não há procedure confirmada, `start`/`restart` seguem caindo
+> em `services.compose.deployService` e `stop` devolve orientação.
 
 ### databases (postgres / mysql / mariadb / mongo / redis)
 | Procedure | Tipo | Tool |
@@ -202,12 +237,20 @@ users            volumeBackups    wordpress
 | Procedure | Tipo | Tool |
 |---|---|---|
 | `monitorOld.getSystemStats` | Q | `get_system_stats` |
-| `monitorOld.getDockerTaskStats` | Q | `get_docker_stats`, `get_service_stats` |
+| `monitorOld.getServiceStats` | Q | `get_service_stats` |
+| `monitorOld.getDockerTaskStats` | Q | `get_docker_stats` (fallback de `get_service_stats`) |
 | `monitorOld.getStorageStats` | Q | `get_storage_stats` |
 
-> Existe também o namespace mais novo `monitor.*` (ex.: `monitor.getSystemStats`,
-> `monitor.getServiceStats`). Este MCP usa `monitorOld.*` por estabilidade; vale avaliar
-> migrar se o `monitor.*` entregar dados melhores.
+> ⚠️ `getDockerTaskStats` devolve **estado das tasks** (`{actual, desired}` de
+> réplicas), **não** CPU/memória. Até a v2 o `get_service_stats` lia dessa procedure
+> apesar de prometer CPU/memória; agora usa `getServiceStats`, que retorna
+> `{cpu, memory, network}`. O dado de réplicas segue como fallback para painéis
+> antigos, rotulado pelo que é.
+>
+> Existe também o namespace mais novo `monitor.*` (métricas via Prometheus, sob a tag
+> "Metrics" na API pública: `getMetricsSystemStats`, `getMetricsServiceStats`,
+> `getAllServicesStats`). Este MCP usa `monitorOld.*` por não exigir a stack de
+> métricas habilitada no painel.
 
 ### settings / server / users / certificates / cluster
 | Procedure | Tipo | Tool |
@@ -229,11 +272,12 @@ users            volumeBackups    wordpress
 
 ---
 
-## Acesso ao restante: `trpc_raw`
+## Acesso ao restante: `easypanel_raw`
 
-Cobrir 347 procedures com tools tipadas seria inviável. Tudo que **não** tem tool
-dedicada é acessível pela tool [`trpc_raw`](../src/tools/raw.ts), que chama qualquer
-procedure diretamente:
+Cobrir 375 operações com tools tipadas seria inviável. Tudo que **não** tem tool
+dedicada é acessível pela tool [`easypanel_raw`](../src/tools/raw.ts), que chama
+qualquer operação diretamente (nome achatado no 2.33+, ou a notação antiga, que é
+traduzida):
 
 ```jsonc
 // leitura (padrão)
@@ -245,11 +289,11 @@ procedure diretamente:
   "isMutation": true, "confirm": "CONFIRMO" }
 ```
 
-Mutations via `trpc_raw` pulam os guards das tools curadas, então a confirmação
+Mutations via `easypanel_raw` pulam os guards das tools curadas, então a confirmação
 explícita é a rede de segurança mínima. Em `MCP_ACCESS_MODE=readonly`, qualquer
 mutation (curada ou raw) é bloqueada no client. Em painéis 2.31+ — onde todo o
 transporte é POST — o client classifica a procedure contra o OpenAPI do painel de
-forma **fail-closed**: leituras via `trpc_raw` só executam se a procedure constar
+forma **fail-closed**: leituras via `easypanel_raw` só executam se a procedure constar
 como query (spec indisponível ou procedure desconhecida → recusada), então não dá
 para executar escrita "disfarçada" de leitura.
 
@@ -267,14 +311,15 @@ painel algum dia expuser uma escrita chamada `getX`, ela seria classificada como
 leitura. Se um spec futuro voltar a marcar a natureza da procedure, prefira esse
 sinal a este fallback.
 
-> ⚠️ **Reads via `trpc_raw` não são protegidos pelo readonly** e podem retornar
+> ⚠️ **Reads via `easypanel_raw` não são protegidos pelo readonly** e podem retornar
 > dados sensíveis (ex.: `services.app.inspectService` devolve env vars com secrets de
 > qualquer projeto). Em ambientes expostos a conteúdo não confiável (risco de prompt
 > injection), defina **`EASYPANEL_RAW_DISABLED=1`** para desligar o escape hatch por
 > completo. O input também é validado (precisa ser objeto) e o nome da procedure é
 > restrito a `[a-zA-Z0-9.]` para evitar injeção de path/query.
 
-Namespaces úteis acessíveis só por `trpc_raw`: `traefik.*`, `branding.*`,
+Áreas acessíveis só por `easypanel_raw` (notação antiga; no 2.33+ use o nome
+achatado do `openapi.json`): `traefik.*`, `branding.*`,
 `cloudflareTunnel.*`, `box.*`, `middlewares.*`, `notifications.*`,
 `volumeBackups.*`, `databaseBackups.*`, `wordpress.*`, `git.*`, `update.*`,
 `twoFactor.*`, `setup.*`.
@@ -285,7 +330,7 @@ Namespaces úteis acessíveis só por `trpc_raw`: `traefik.*`, `branding.*`,
 
 Defina `MCP_ACCESS_MODE=readonly` para bloquear **toda** escrita (mutations),
 deixando apenas leitura/diagnóstico. O bloqueio é feito em
-[`EasyPanelClient.mutate`](../src/client.ts), cobrindo tools curadas e `trpc_raw`
+[`EasyPanelClient.mutate`](../src/client.ts), cobrindo tools curadas e `easypanel_raw`
 de uma vez. Default: `full`.
 
 ---
@@ -303,7 +348,7 @@ de uma vez. Default: `full`.
    `/api/trpc/...` ou `/api/rpc/...` — o nome e o payload aparecem ali.
 3. **Bundle do frontend:** os nomes das procedures estão no JS do painel; um
    `grep` por `.<namespace>.` no bundle revela as procedures de um router.
-4. **Testar com `trpc_raw`:** comece sempre com `isMutation:false` (leitura) para
+4. **Testar com `easypanel_raw`:** comece sempre com `isMutation:false` (leitura) para
    inspecionar o shape de retorno antes de tentar uma escrita.
 
 Ao confirmar uma nova procedure, adicione-a à tabela acima e — se for de uso comum —

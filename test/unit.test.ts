@@ -234,14 +234,22 @@ test("validateKeyValue rejeita newline em key/value", () => {
 // raw.ts — validação do nome da procedure (anti path/query injection)
 // ---------------------------------------------------------------------------
 test("isValidProcedureName aceita procedures bem formadas", () => {
-  for (const p of ["users.listUsers", "services.app.deployService", "traefik.getDashboard"]) {
+  for (const p of [
+    // notação antiga (namespace.procedure), painéis ≤ 2.32
+    "users.listUsers",
+    "services.app.deployService",
+    "traefik.getDashboard",
+    // notação achatada da API pública (2.33+)
+    "listUsers",
+    "inspectAppService",
+    "getLegacyMonitorSystemStats",
+  ]) {
     assert.equal(isValidProcedureName(p), true, p);
   }
 });
 
 test("isValidProcedureName rejeita nomes perigosos", () => {
   for (const bad of [
-    "semponto",            // sem namespace
     "a/b",                 // barra
     "a..b",                // segmento vazio
     "a.b?x=1",             // query

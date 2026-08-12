@@ -2,7 +2,7 @@
 
 > MCP Server for full Easypanel control via Claude Code, Cursor and Claude Desktop.
 
-easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read runtime logs, exec commands inside containers, manage domains, databases, volumes and ports, set resource limits, run Docker maintenance, and monitor infrastructure directly from Claude Code or Cursor — plus a `trpc_raw` escape hatch reaching any of Easypanel's ~350 procedures. v2.x speaks both Easypanel API generations (tRPC on panels ≤ 2.30 and the new RPC layer of 2.31+) with automatic detection.
+easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools for managing Easypanel — a modern Docker-based server control panel. Use it to deploy apps, manage services, configure env vars, read runtime logs, exec commands inside containers, manage domains, databases, volumes and ports, set resource limits, run Docker maintenance, and monitor infrastructure directly from Claude Code or Cursor — plus an `easypanel_raw` escape hatch reaching any of Easypanel's ~375 API operations. v3.x speaks all three Easypanel API generations (tRPC on panels ≤ 2.30, the RPC layer of 2.31–2.32, and the public API of 2.33+) with automatic detection.
 
 ## Available tools (57)
 
@@ -10,13 +10,13 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `get_project`: Get full details of a project including all services
 - `create_project`: Create a new project
 - `delete_project`: Permanently delete a project and all its services — requires confirm: "CONFIRMO"
-- `inspect_service`: Get complete service config: source, env vars, deploy settings, mounts, ports, resources. Use BEFORE any update to preserve current state.
+- `inspect_service`: Get complete service config: source, env vars, deploy settings, mounts, ports, resources. Routes by service type (app, compose, databases). Use BEFORE any update to preserve current state.
 - `create_service`: Create a new app service in a project
 - `rename_service`: Rename or move a service — requires confirm: "CONFIRMO"
 - `destroy_service`: Permanently destroy a service — requires confirm: "CONFIRMO"
 - `deploy_service`: Trigger a deploy with the current source configuration
 - `start_service`: Start a stopped service
-- `stop_service`: Stop a service in production — requires confirm: "CONFIRMO"
+- `stop_service`: Stop a service in production — requires confirm: "CONFIRMO". Works for app and (on Easypanel 2.33+) compose services
 - `restart_service`: Restart a service
 - `get_service_error`: Get the last recorded error from a service — use for debugging
 - `get_service_notes`: Read notes saved on a service
@@ -42,9 +42,9 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `create_database`: Create a Postgres, MySQL, MariaDB, MongoDB or Redis service
 - `inspect_database`: Get database details including credentials and connection string
 - `destroy_database`: Permanently destroy a database and all its data — requires confirm: "CONFIRMO"
-- `get_docker_stats`: Get Docker container stats (CPU, memory, network per container)
+- `get_docker_stats`: Get Docker task state per service — running replicas (actual) vs desired. For CPU/memory of one service use get_service_stats
 - `get_storage_stats`: Get server storage usage
-- `get_service_stats`: Get metrics for a specific service container
+- `get_service_stats`: Get CPU, memory and network metrics for a specific service container
 - `list_containers`: List a service's running Docker containers (ID, image, command, status, ports)
 - `exec_in_container`: Run a shell command inside a service's container and return its output — for runtime debugging
 - `get_docker_events`: Capture real-time Docker events during a short window (start/stop/kill/die/exec/health)
@@ -62,7 +62,7 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `list_nodes`: List Docker Swarm cluster nodes (local node only on single-server setups)
 - `restart_panel`: Restart Easypanel itself — requires confirm: "CONFIRMO"
 - `reboot_server`: Reboot the entire host server — requires confirm: "CONFIRMO"
-- `trpc_raw`: Call any Easypanel API procedure directly (~350 across 40+ namespaces, dot notation on both API generations). Reads by default; writes require isMutation: true and confirm: "CONFIRMO"
+- `easypanel_raw`: Call any Easypanel API operation directly (~375). On panels 2.33+ use the flat public name (`listCertificates`); the old dot notation (`certificates.listCertificates`) is still accepted and translated. Reads by default; writes require isMutation: true and confirm: "CONFIRMO". The old tool name `trpc_raw` still routes for backward compatibility
 
 ## Quick start
 
@@ -87,9 +87,9 @@ Add to your `.mcp.json` or `.cursor/mcp.json`:
 
 - `EASYPANEL_URL` (required): Your Easypanel panel URL without trailing slash
 - `EASYPANEL_TOKEN` (required): API token — generate at Easypanel → Settings → API → Generate Token
-- `MCP_ACCESS_MODE` (optional): set to `readonly` to block all writes (curated tools and trpc_raw); reads stay available
-- `EASYPANEL_RAW_DISABLED` (optional): set to `1` to disable the trpc_raw escape hatch entirely
-- `EASYPANEL_API_FLAVOR` (optional): force the panel API generation instead of auto-detecting — `trpc` (Easypanel ≤ 2.30) or `rpc` (≥ 2.31)
+- `MCP_ACCESS_MODE` (optional): set to `readonly` to block all writes (curated tools and easypanel_raw); reads stay available
+- `EASYPANEL_RAW_DISABLED` (optional): set to `1` to disable the easypanel_raw escape hatch entirely
+- `EASYPANEL_API_FLAVOR` (optional): force the panel API generation instead of auto-detecting — `trpc` (Easypanel ≤ 2.30), `rpc` (2.31–2.32) or `public` (≥ 2.33). Remove a stale `rpc` pin from v2, or a 2.33 panel stays on the internal API
 
 ## Safety features
 
@@ -102,8 +102,8 @@ Destructive actions (delete, destroy, stop, prune, reboot) return `status: "BLOQ
 
 ## Known limitations
 
-- WordPress/Box service types have no dedicated tools — reach them via `trpc_raw`
-- `trpc_raw` reads bypass read-only mode and can return secrets — use `EASYPANEL_RAW_DISABLED=1` in untrusted environments
+- WordPress/Box service types have no dedicated tools — reach them via `easypanel_raw` (`inspectWordPressService`, `createBoxService`)
+- `easypanel_raw` reads bypass read-only mode and can return secrets — use `EASYPANEL_RAW_DISABLED=1` in untrusted environments
 - `list_nodes` returns the local node only on single-server setups (no Swarm cluster)
 - Docker events are real-time only (no history) — an idle server may return an empty window
 

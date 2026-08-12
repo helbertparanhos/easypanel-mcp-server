@@ -1,5 +1,35 @@
 # Changelog
 
+## [3.0.0] - 2026-08-12
+
+Suporte ao **Easypanel 2.33**, que publicou uma **API pública documentada** e passou a avisar que a interna "may change without notice and should not be relied upon". O MCP migrou para ela.
+
+### ⚠️ Breaking
+- **`trpc_raw` virou `easypanel_raw`.** A API não é mais tRPC, e o escape hatch agora aceita o nome achatado da API pública (`listCertificates`) além da notação antiga (`certificates.listCertificates`). O nome `trpc_raw` **continua sendo roteado** (não aparece mais em `tools/list`, mas chamadas antigas seguem funcionando) — skills e prompts salvos não quebram.
+- **`get_docker_stats` teve a descrição corrigida.** Ela sempre retornou contagem de réplicas (`{actual, desired}`), nunca CPU/memória como a descrição prometia. O comportamento não mudou; a descrição agora diz a verdade.
+- Major bump pelo transporte novo e pela renomeação. Os **57 tools, seus nomes e parâmetros continuam idênticos**.
+
+### Fixed
+- **Easypanel 2.33 quebrou o `trpc_raw` (de novo).** O `/api/openapi.json` deixou de descrever `/api/rpc/*` e passou a descrever a API pública, com paths de um segmento só (`/getAction`) e `operationId` sem namespace. O `kindMapFromSpec` da v2 montava o mapa com chaves achatadas (`getaction`), então **todo lookup namespaced dava `undefined` e toda leitura via `trpc_raw` era recusada** (fail-closed) em painéis 2.33+. Confirmado ao vivo num 2.33.1 antes da correção.
+- **`inspect_service` e `destroy_service` ignoravam o tipo do serviço** e sempre chamavam `services.app.*` — inspecionar ou destruir um serviço **compose** ou de **banco** resultava em 404 opaco. Agora resolvem o tipo e roteiam para o namespace certo.
+- **`get_env_vars` / `set_env_var` / `delete_env_var` também eram fixos em `services.app.*`**, então o env de um serviço **compose** era inacessível. Agora roteiam por tipo; em bancos (que não têm env editável) devolvem orientação em vez de erro.
+- **`get_service_stats` prometia CPU e memória mas devolvia contagem de réplicas.** Passou a usar `getServiceStats`, que retorna `{cpu, memory, network}` de verdade; painéis antigos sem essa procedure caem no dado de réplicas, agora rotulado pelo que é.
+- **`stop_service` em compose deixou de ser "não suportado"** nos painéis 2.33+: `startComposeService`/`stopComposeService`/`restartComposeService` existem na API pública e agora são usados. Em painéis antigos o comportamento anterior é preservado.
+- **Resposta 200 com corpo vazio deixou de virar erro.** Procedures que não retornam nada (confirmado em `listNodes`) faziam `JSON.parse("")` lançar "Resposta inválida".
+
+### Added
+- **Flavor `public` (Easypanel ≥ 2.33):** leitura via `GET /api/<op>?param=valor`, escrita via `POST /api/<op>` com body JSON puro, resposta **sem envelope**. A detecção sonda `GET /api/getUpdateStatus` **antes** das rotas antigas — o 2.33 mantém `/api/trpc/*` e `/api/rpc/*` vivos, e sondá-las primeiro classificaria o painel como `rpc`. A versão do painel vai para o stderr no boot.
+- **Classificação leitura/escrita exata.** Na API pública o método HTTP volta a separar as duas coisas, então a heurística de nomes (`get`/`list`/... = leitura) **não é mais usada** em painéis 2.33+ — o guard de `easypanel_raw` passa a ser o que o painel declara. A heurística segue viva só para 2.31–2.32.
+- **Guard no sentido inverso:** chamar uma **leitura** com `isMutation:true` agora é recusado com mensagem clara, em vez de virar um POST sem rota.
+- **Erros acionáveis.** Os `zodErrors` por campo da API pública são propagados: `Easypanel API error 400 on [listVolumeBackups]: Input validation failed (projectName: Required; serviceName: Required)` em vez de só "Input validation failed".
+- **`EASYPANEL_API_FLAVOR=public`** como override manual.
+- **`test/fixtures/easypanel-2.33-ops.json`** — snapshot das 375 operações de um painel 2.33.1. Os testes conferem que **toda** procedure mapeada existe no spec e com o método esperado, transformando uma renomeação futura do Easypanel em falha de CI em vez de 404 em produção (34 → 50 testes).
+
+### Notes
+- **Parâmetro numérico em leitura cai no transporte interno, de propósito.** O painel 2.33 valida query params com zod **sem coerção**: `?limit=5` chega como `"5"` e é rejeitado com "Expected number, received string" — não há codificação que resolva (testado com `limit=5` e `limit[]=5`). Quando o input tem qualquer valor não-string, o client usa `/api/rpc` (que carrega JSON no body) e registra o motivo no stderr. Atinge 5 das 103 leituras do painel; entre as tools curadas, só `list_actions`/`get_build_logs` (`limit`).
+- **Se você fixou `EASYPANEL_API_FLAVOR=rpc` por causa da v2**, remova a variável: com ela o MCP continua no transporte interno, que o Easypanel declarou instável.
+- **O Easypanel 2.33 também ganhou um MCP nativo** (`/api/mcp`). Ele não cobre logs de runtime e exec em container via WebSocket, `MCP_ACCESS_MODE=readonly`, os gates `CONFIRMO` nem o mascaramento de secrets — veja a comparação no README.
+
 ## [2.0.1] - 2026-07-16
 
 ### Fixed

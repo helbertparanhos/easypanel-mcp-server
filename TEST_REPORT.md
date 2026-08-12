@@ -1,94 +1,91 @@
-# Test Report — easypanel-mcp-server v1.3.0
+# Test Report — easypanel-mcp-server v3.0.0
 
-**Data:** 2026-06-08
-**Ambiente:** Node v24 · Windows 11
-**Servidor:** `node dist/index.js` (stdio)
-**Painel de teste:** instância Easypanel real (v2.30.1), projeto `aplicativos`
+**Data:** 2026-08-12
+**Ambiente:** Node v26 · Windows 11
+**Servidor:** `node dist/index.js` (stdio, compilado)
+**Painel de teste:** instância Easypanel real **2.33.1**, projetos `aplicativos` / `ferramentas`
 
 ## Metodologia
 
-Três camadas: (1) **suíte automatizada** de testes unitários das funções puras de
-segurança e roteamento (`npm test`, sem rede); (2) **validação ponta-a-ponta** dos
-handlers contra a API tRPC/WebSocket de um painel Easypanel real; (3) revisão de
-código das mutações destrutivas (não executadas contra produção por design, exceto o
-redeploy de compose abaixo, autorizado pelo usuário).
+Quatro camadas: (1) **suíte automatizada** sem rede; (2) **contrato de API** travado
+contra um snapshot real do OpenAPI do painel; (3) **validação ponta-a-ponta** dos
+handlers contra o painel 2.33.1; (4) **end-to-end no binário compilado**, falando MCP
+por stdio como o Claude Code o executa.
 
-## Suíte automatizada (`npm test` — 23 testes, 0 falhas)
+Escritas destrutivas **não** foram executadas contra produção por design. A única
+escrita realizada foi um **no-op verificado** (reescrever as notas de um serviço com o
+valor que elas já tinham, conferindo antes e depois) — o suficiente para provar o
+caminho `POST /api/<op>` com body JSON puro sem alterar estado.
 
-Testes unitários determinísticos (Node `node:test` via `tsx`), sem tocar a rede:
+## 1. Suíte automatizada (`npm test` — 50 testes, 0 falhas)
 
 | Área | Cobertura |
-|------|-----------|
-| `assertValidName` | aceita nomes válidos; rejeita maiúsculas, espaços, `/`, `..`, `.`, `;`, não-ascii, não-string |
-| `looksDestructiveCommand` | detecta rm -rf/dd/mkfs/shutdown/kill/fork bomb/pipe-para-shell; deixa passar leitura |
-| `guardDestructive` | libera só com `CONFIRMO` exato; bloqueia variações |
-| `isReadOnly` | reflete `MCP_ACCESS_MODE` (case-insensitive) |
-| `extractServiceType` | roteamento app/compose/db nas 3 formas de resposta; null p/ tipo/projeto/dados inválidos |
-| env vars | `parseEnvString`/`serializeEnvVars` roundtrip; escape de newline (anti-injeção); `maskSensitiveValues`; `validateKeyValue` |
-| `isValidProcedureName` | aceita `namespace.procedure`; rejeita barra/query/traversal/sem-ponto/não-string |
-| registry | 57 tools, nomes únicos, inputSchema object, tools destrutivas declaram `confirm`, dispatcher rejeita tool desconhecida |
+|---|---|
+| `context.ts` | guards de confirmação, validação de nomes, detecção de comando destrutivo, readonly |
+| `services.ts` | roteamento por tipo de serviço (`extractServiceType`, 4 formas de resposta) |
+| `env.ts` | parse/serialize/mascaramento de env vars, anti-injeção de newline |
+| `raw.ts` | validação do nome da operação nas duas notações (achatada e com namespace) |
+| `client.ts` | detecção de geração, `rpcPath`, `unwrapBody`, `safeServerMessage`, `kindMapFromSpec` (2.31 e 2.32) |
+| `client.ts` (v3) | `publicIndexFromSpec`, `toQueryParams`, `errorMessageFromBody` |
+| `procedures.ts` (v3) | tradução interno ↔ público, bijeção do mapa |
 
-## Infra
+## 2. Contrato de API (`test/procedures.test.ts`)
 
-| Item | Status |
-|------|--------|
-| `tools/list` retorna 57 tools | ✅ |
-| `tools/call` end-to-end via stdio | ✅ |
-| Build `tsc` | ✅ |
-| `npm test` (23 testes) | ✅ 0 falhas |
-| `npm audit` | ✅ 0 vulnerabilidades |
+Snapshot de **375 operações** de um painel 2.33.1 em
+`test/fixtures/easypanel-2.33-ops.json`. Os testes verificam que:
 
-## Roteamento Compose validado ao vivo (v1.3.0)
+- **as 61 procedures mapeadas existem** no spec do painel;
+- as **20 leituras curadas são `GET`** e as **32 escritas curadas são `POST`** —
+  classificação exata, sem heurística de nomes;
+- os 5 tipos de banco têm `create`/`inspect`/`destroy` mapeados;
+- nenhum nome público está duplicado (o reverso seria ambíguo).
 
-| Verificação | Status | Observações |
-|------|--------|-------------|
-| Forma de `listProjectsAndServices` | ✅ | `{ projects, services:[{projectName,name,type}] }`; `aplicativos/strat-vexa` = `compose` |
-| `deploy_service` roteia compose → `services.compose.deployService` | ✅ | HTTP 200, action `status=done` |
-| Stack `strat-vexa` saudável pós-deploy | ✅ | `vexa-api`/`vexa-dashboard`/`vexa-db` todos `running` (api e db `healthy`) |
+Efeito prático: uma renomeação futura do Easypanel vira **falha de CI**, não 404 em
+produção. Foi exatamente assim que o 2.33 quebrou o `trpc_raw` da v2 — o painel
+reorganizou o spec e o cliente só descobriu ao vivo.
 
-## Tools verificadas ao vivo (executadas contra o painel real)
+## 3. Validação ponta-a-ponta (painel 2.33.1 — 34 verificações, 0 falhas)
 
-| Tool | Status | Observações |
-|------|--------|-------------|
-| `inspect_service` | ✅ OK | retorna config completa do serviço |
-| `list_actions` | ✅ OK | filtros server-side (projectName/serviceName/type) |
-| `get_build_logs` | ✅ OK | log de build completo via `actions.getAction` |
-| `get_service_logs` | ✅ OK | logs de runtime via WebSocket `/ws/serviceLogs` |
-| `get_service_error` | ✅ OK | exercido pelo fallback do `get_service_logs` |
-| `list_containers` | ✅ OK | lista containers Docker do serviço |
-| `exec_in_container` | ✅ OK | exec no container; guard de comando destrutivo validado (bloqueia sem `CONFIRMO`, permite leitura, executa destrutivo com confirm) |
-| `get_docker_events` | ✅ OK | captura eventos Docker em tempo real |
-| `get_exposed_ports` | ✅ OK | retorna portas publicadas (vazio p/ hermes) |
-| `get_service_stats` | ✅ OK | indexa a chave correta (bug do "retorna todos" corrigido) |
-| `get_docker_stats` | ✅ OK | métricas por container |
+Rodado com `MCP_ACCESS_MODE=readonly` como cinto de segurança.
 
-## Tools validadas por revisão (não executadas contra produção)
+| Bloco | Verificações |
+|---|---|
+| Projetos / serviços | `list_projects`, `get_project`, `inspect_service` (app **e compose**), `get_service_error`, `get_exposed_ports`, `get_service_notes` |
+| Env / rede / storage | `get_env_vars` (app, **compose**, **banco**), `list_domains`, `list_mounts`, `list_ports` |
+| Monitoramento | `get_system_stats`, `get_docker_stats`, `get_storage_stats`, `get_service_stats` |
+| Containers / ações | `list_containers`, `list_actions` (com e sem filtro), `get_build_logs` |
+| Infra | `list_users`, `list_certificates`, `list_nodes`, `inspect_compose`, `inspect_database` |
+| Escape hatch | nome achatado, nome com namespace, alias legado `trpc_raw` |
+| Guards | escrita-como-leitura, leitura-como-escrita, readonly, escrita sem `CONFIRMO` |
 
-Operações que criam, alteram ou removem recursos — não executadas para não afetar o painel real. Procedures tRPC confirmados; guards de confirmação (`CONFIRMO`) presentes nas destrutivas.
+**Correções da v3 confirmadas ao vivo:**
 
-| Categoria | Tools |
-|-----------|-------|
-| Projetos | `list_projects`, `get_project`, `create_project`, `delete_project` ⚠️ |
-| Serviços | `create_service`, `rename_service` ⚠️, `destroy_service` ⚠️, `deploy_service`, `start_service`, `stop_service` ⚠️, `restart_service`, `get_service_notes`, `set_service_notes`, `get_action` |
-| Deploy | `set_source_github`, `set_source_image`, `enable_github_deploy`, `disable_github_deploy` |
-| Env vars | `get_env_vars`, `set_env_var`, `delete_env_var` ⚠️ |
-| Domínios | `list_domains`, `add_domain`, `remove_domain` ⚠️, `set_primary_domain` |
-| Bancos | `create_database`, `inspect_database`, `destroy_database` ⚠️ |
-| Monitoramento | `get_system_stats`, `get_storage_stats` |
+- `inspect_service` num serviço **compose** retorna a config (antes: 404, ia para `services.app.*`);
+- `get_env_vars` num **compose** lista as vars; num **banco** devolve orientação em vez de erro;
+- `get_service_stats` retorna `{cpu, memory, network}` (antes: contagem de réplicas);
+- `list_actions` com `limit` numérico funciona pelo fallback ao transporte interno, com o motivo logado em stderr;
+- os `zodErrors` aparecem no erro: `Easypanel API error 400 on [listVolumeBackups]: Input validation failed (projectName: Required; serviceName: Required)`.
 
-⚠️ = exige `confirm: "CONFIRMO"`
+**Escrita (no-op verificado):** `set_service_notes` gravou o mesmo valor de volta em
+`aplicativos/demandas`; leitura antes e depois idênticas. Confirma
+`POST /api/setServiceNotes` com body JSON puro.
 
-## Resumo
+## 4. End-to-end no compilado (stdio — 7 verificações, 0 falhas)
 
-- **Total:** 57 tools + `trpc_raw`
-- **Suíte automatizada:** ✅ 23/23 (funções puras de segurança e roteamento, sem rede)
-- **Verificadas ao vivo:** tools de leitura/diagnóstico + roteamento compose (`deploy_service` → compose, redeploy real do `strat-vexa`)
-- **Validadas por revisão:** mutáveis/destrutivas curadas (não executadas contra produção por design, exceto o redeploy autorizado)
-- **Erros:** 0
-- **Infra (load + roteamento + stdio):** ✅ 57/57
+`node dist/index.js` com `initialize` → `tools/list` → `tools/call` reais:
 
-## Observações
+- `serverInfo` = `easypanel-mcp v3.0.0`; **57 tools** anunciadas;
+- `easypanel_raw` na lista, `trpc_raw` **fora** da lista mas ainda roteado;
+- auto-detecção acertou o painel (`painel 2.33.1 — usando a API pública`) sem override;
+- `readonly` bloqueou `delete_project` na origem.
 
-- Logs de runtime (`get_service_logs`) dependem do WebSocket `/ws/serviceLogs`, que funciona sem licença. O "Advanced Logs" (Loki) do Easypanel é opcional e exige licença — não é usado.
-- `get_docker_events` captura apenas eventos que ocorrem durante a janela (~8s); servidor ocioso pode retornar vazio (sem histórico no Docker).
-- `exec_in_container` executa comandos arbitrários no container — comandos destrutivos exigem confirmação explícita.
+## Não coberto
+
+- **Painéis ≤ 2.32 não foram re-validados ao vivo** nesta release. Os caminhos `trpc` e
+  `rpc` foram preservados e seguem cobertos por testes unitários, mas o painel de teste
+  disponível é 2.33.1.
+- **Escritas destrutivas** (deploy, destroy, stop, prune, reboot) não são executadas
+  contra produção. A migração dessas procedures é garantida pelo contrato de API da
+  camada 2: nome e método conferidos contra o spec real do painel.
+- **Compose `start`/`stop`/`restart`** (novos no 2.33) foram validados por contrato
+  (existem no spec, são `POST`), não por execução.

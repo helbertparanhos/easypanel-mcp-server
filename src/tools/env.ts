@@ -1,6 +1,7 @@
 import { Tool, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { getClient } from "../client.js";
 import { contextHeader, guardDestructive, ok, CONFIRM_KEYWORD } from "../context.js";
+import { resolveServiceType, type ServiceType } from "./services.js";
 
 const SENSITIVE_PATTERN = /secret|password|token|key|pwd|credential|private|auth/i;
 
@@ -109,11 +110,33 @@ export async function handleEnvTool(name: string, args: Args) {
   const { projectName, serviceName } = args as { projectName: string; serviceName: string };
   const ctx = contextHeader(projectName, serviceName);
 
+  // Serviços app e compose guardam o env em namespaces diferentes; bancos não
+  // expõem env editável. Até a v2 estas tools sempre falavam com `services.app.*`,
+  // então editar o env de um compose dava 404.
+  const ENV_CAPABLE: readonly ServiceType[] = ["app", "compose"];
+  const serviceType = (await resolveServiceType(client, projectName, serviceName)) ?? "app";
+  if (!ENV_CAPABLE.includes(serviceType)) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: ok(ctx, {
+            status: "nao_suportado",
+            tipo: serviceType,
+            motivo:
+              "Serviços de banco de dados não têm variáveis de ambiente editáveis no Easypanel — a configuração vem das credenciais e do bloco 'advanced'.",
+            alternativa: "Use inspect_database para ver credenciais e conexão.",
+          }),
+        },
+      ],
+    };
+  }
+
   async function readCurrentEnv(): Promise<Record<string, string>> {
-    const service = await client.query<{ env: string }>("services.app.inspectService", {
-      projectName,
-      serviceName,
-    });
+    const service = await client.query<{ env: string }>(
+      `services.${serviceType}.inspectService`,
+      { projectName, serviceName }
+    );
     return parseEnvString(service.env ?? "");
   }
 
@@ -145,7 +168,7 @@ export async function handleEnvTool(name: string, args: Args) {
     const current = await readCurrentEnv();
     const isNew = !(key in current);
     current[key] = value;
-    await client.mutate("services.app.updateEnv", {
+    await client.mutate(`services.${serviceType}.updateEnv`, {
       projectName,
       serviceName,
       env: serializeEnvVars(current),
@@ -186,7 +209,7 @@ export async function handleEnvTool(name: string, args: Args) {
       };
     }
     delete current[key];
-    await client.mutate("services.app.updateEnv", {
+    await client.mutate(`services.${serviceType}.updateEnv`, {
       projectName,
       serviceName,
       env: serializeEnvVars(current),
