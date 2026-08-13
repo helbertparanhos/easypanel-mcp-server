@@ -17,7 +17,11 @@ escrita realizada foi um **no-op verificado** (reescrever as notas de um serviç
 valor que elas já tinham, conferindo antes e depois) — o suficiente para provar o
 caminho `POST /api/<op>` com body JSON puro sem alterar estado.
 
-## 1. Suíte automatizada (`npm test` — 50 testes, 0 falhas)
+Antes do release a branch passou por **revisão de código** (`/code-review high`), que
+levantou 4 problemas — todos confirmados e corrigidos, com teste ou validação ao vivo
+para cada um (ver seção 5).
+
+## 1. Suíte automatizada (`npm test` — 51 testes, 0 falhas)
 
 | Área | Cobertura |
 |---|---|
@@ -78,6 +82,20 @@ Rodado com `MCP_ACCESS_MODE=readonly` como cinto de segurança.
 - `easypanel_raw` na lista, `trpc_raw` **fora** da lista mas ainda roteado;
 - auto-detecção acertou o painel (`painel 2.33.1 — usando a API pública`) sem override;
 - `readonly` bloqueou `delete_project` na origem.
+
+## 5. Revisão de código (4 achados, 4 corrigidos)
+
+| Achado | Verificação da correção |
+|---|---|
+| Leituras com param não-string inalcançáveis pelo `easypanel_raw` (métricas/logs) | 5 nomes internos confirmados ao vivo; `getMetricsSystemStats` e `getAllServicesStats` respondem 200 pelo transporte interno. Teste novo falha se qualquer leitura de param não-string ficar sem rota |
+| Sonda transitória cacheava o flavor errado, prendendo o processo na API interna | Detecção agora separa resposta conclusiva de falha de rede/5xx; só cacheia a conclusiva |
+| Nome achatado quebrava em painéis ≤ 2.32 | Tradução achatado → namespace aplicada nos transportes `trpc` e `rpc` |
+| `null` de 200 sem corpo virava `TypeError` em env/database | Guardas `?.` em `readCurrentEnv` e `buildConnectionString` |
+
+`queryServiceLogs` roteia corretamente mas o painel devolve `400 fetch failed` — o
+Advanced Logs (Loki) não está configurado nessa instância. A chamada direta a
+`/api/rpc/logs/queryServiceLogs` dá o mesmo erro, o que confirma que o roteamento
+está certo e a limitação é do painel.
 
 ## Não coberto
 

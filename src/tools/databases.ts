@@ -70,6 +70,8 @@ export const databaseTools: Tool[] = [
 ];
 
 function buildConnectionString(type: DbType, info: any): string {
+  // `info` pode vir null (200 sem corpo) — tolera e cai nos defaults.
+  info = info ?? {};
   const host = info.internalHost ?? info.host ?? "localhost";
   const port = info.exposedPort ?? info.port;
   const user = info.username ?? (type === "mongo" ? "" : type);

@@ -290,6 +290,24 @@ function dbLabel(type: ServiceType): string {
 }
 
 /**
+ * Como ligar/desligar um banco, na forma que funciona no painel em uso.
+ * O nome achatado (`enablePostgresService`) só existe na API pública 2.33+; num
+ * painel antigo ele viraria `/api/rpc/enablePostgresService` e daria 404, então
+ * ali apontamos para a UI em vez de mandar o usuário para uma chamada quebrada.
+ */
+async function dbPowerHint(
+  client: ReturnType<typeof getClient>,
+  type: ServiceType,
+  verbo: "enable" | "disable"
+): Promise<string> {
+  const flat = `${verbo}${dbLabel(type)}Service`;
+  return (await client.isPublicApi())
+    ? `Use easypanel_raw com isMutation:true e procedure "${flat}".`
+    : `Use o painel do Easypanel (botão ${verbo === "enable" ? "Start" : "Stop"} do serviço) — ` +
+      `este painel é anterior ao 2.33 e não documenta "${flat}".`;
+}
+
+/**
  * Resposta padrão para uma ação de ciclo de vida que o tipo do serviço não
  * expõe. Melhor que disparar no namespace errado (era o que acontecia até a v2:
  * `destroy_service`/`inspect_service` chamavam `services.app.*` mesmo em compose
@@ -439,13 +457,13 @@ export async function handleServiceTool(name: string, args: Args) {
         "start_service",
         type,
         "Bancos de dados são ligados/desligados por procedures próprias (enable/disable), não por start.",
-        `Use easypanel_raw com isMutation:true e procedure "enable${dbLabel(type)}Service".`
+        await dbPowerHint(client, type, "enable")
       );
     }
     if (type === "compose") {
       // O 2.33 documenta startComposeService na API pública. Em painéis antigos
       // não havia procedure confirmada — ali subir um stack parado = redeploy.
-      if (await client.supportsComposeLifecycle()) {
+      if (await client.isPublicApi()) {
         await client.mutate("services.compose.startService", { projectName, serviceName });
         return {
           content: [
@@ -492,14 +510,14 @@ export async function handleServiceTool(name: string, args: Args) {
         "stop_service",
         type,
         "Bancos de dados são ligados/desligados por procedures próprias (enable/disable), não por stop.",
-        `Use easypanel_raw com isMutation:true e procedure "disable${dbLabel(type)}Service".`
+        await dbPowerHint(client, type, "disable")
       );
     }
     if (type === "compose") {
       // O 2.33 documenta stopComposeService na API pública. Em painéis antigos não
       // havia procedure confirmada, e parar ≠ redeploy — ali seguimos orientando
       // em vez de disparar uma escrita no escuro.
-      if (await client.supportsComposeLifecycle()) {
+      if (await client.isPublicApi()) {
         await client.mutate("services.compose.stopService", { projectName, serviceName });
         return {
           content: [
@@ -530,13 +548,13 @@ export async function handleServiceTool(name: string, args: Args) {
         "restart_service",
         type,
         "Bancos de dados não expõem restart; o ciclo é desligar e ligar (disable/enable).",
-        `Use easypanel_raw com isMutation:true: "disable${dbLabel(type)}Service" e depois "enable${dbLabel(type)}Service".`
+        `${await dbPowerHint(client, type, "disable")} Depois, o equivalente para religar.`
       );
     }
     if (type === "compose") {
       // O 2.33 documenta restartComposeService. Em painéis antigos, "restart" de
       // compose = redeploy (docker compose up recria os containers).
-      if (await client.supportsComposeLifecycle()) {
+      if (await client.isPublicApi()) {
         await client.mutate("services.compose.restartService", { projectName, serviceName });
         return {
           content: [

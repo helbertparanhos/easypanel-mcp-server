@@ -133,11 +133,13 @@ export async function handleEnvTool(name: string, args: Args) {
   }
 
   async function readCurrentEnv(): Promise<Record<string, string>> {
-    const service = await client.query<{ env: string }>(
+    // `query` devolve null quando a procedure responde 200 sem corpo — daí o `?.`
+    // (um serviço sem env também volta sem o campo).
+    const service = await client.query<{ env?: string } | null>(
       `services.${serviceType}.inspectService`,
       { projectName, serviceName }
     );
-    return parseEnvString(service.env ?? "");
+    return parseEnvString(service?.env ?? "");
   }
 
   if (name === "get_env_vars") {

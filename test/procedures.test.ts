@@ -140,6 +140,24 @@ test("internalNameFor faz o caminho de volta (fallback ao transporte /api/rpc)",
   assert.equal(internalNameFor("listVolumeBackups"), null);
 });
 
+test("leituras com param não-string têm rota interna (senão seriam inalcançáveis)", () => {
+  // A API pública recusa número/array na query string, então estas leituras só
+  // funcionam pelo transporte /api/rpc — que precisa do nome com namespace.
+  // Sem mapeamento, `easypanel_raw` não conseguiria chamá-las de forma alguma.
+  const comParamNaoString = Object.entries(fixture.ops)
+    .filter(([, op]) => op.method === "get")
+    .filter(([, op]) => Object.values(op.params ?? {}).some((t) => t !== "string"))
+    .map(([nome]) => nome);
+
+  assert.ok(comParamNaoString.length > 0, "fixture sem nenhuma leitura de param não-string?");
+  const semRota = comParamNaoString.filter((nome) => internalNameFor(nome) === null);
+  assert.deepEqual(
+    semRota,
+    [],
+    `leituras inalcançáveis (nem query string nem rota interna): ${semRota.join(", ")}`
+  );
+});
+
 test("a tradução é uma bijeção (nenhum nome público repetido)", () => {
   const publicos = Object.values(PUBLIC_PROCEDURES);
   assert.equal(

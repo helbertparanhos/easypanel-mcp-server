@@ -102,6 +102,18 @@ export const PUBLIC_PROCEDURES: Record<string, string> = {
   "monitorOld.getDockerTaskStats": "getDockerTaskStats",
   "monitorOld.getStorageStats": "getStorageStats",
 
+  // ---------- métricas e logs (Prometheus/Loki) ----------
+  // Nenhuma tem tool curada, mas TODAS declaram parâmetro não-string (`range`,
+  // `limit`, `levels`) — ou seja, só são alcançáveis pelo transporte interno.
+  // Sem o mapeamento aqui, `easypanel_raw` não conseguiria chamá-las de jeito
+  // nenhum: a query string da API pública não carrega número/array, e o
+  // fallback precisa do nome interno. Confirmados ao vivo num 2.33.1.
+  "metrics.getSystemStats": "getMetricsSystemStats",
+  "metrics.getServiceStats": "getMetricsServiceStats",
+  "metrics.getAllServicesStats": "getAllServicesStats",
+  "logs.queryServiceLogs": "queryServiceLogs",
+  "logs.queryComposeServiceLogs": "queryComposeServiceLogs",
+
   // ---------- infraestrutura / servidor ----------
   "certificates.listCertificates": "listCertificates",
   "cluster.listNodes": "listNodes",

@@ -267,9 +267,13 @@ export class EasyPanelClient {
     if (this.flavorCache) return this.flavorCache;
     if (!this.flavorInFlight) {
       this.flavorInFlight = this.detectFlavor()
-        .then((f) => {
-          this.flavorCache = f;
-          return f;
+        .then(({ flavor, cacheable }) => {
+          // Só memoriza uma detecção confiável. Se a sonda da API pública falhou
+          // por motivo transitório (rede, 5xx), o resultado abaixo dela é um
+          // palpite — cachear prenderia o processo inteiro na API interna, que o
+          // Easypanel declarou instável. Sem cache, a próxima chamada re-detecta.
+          if (cacheable) this.flavorCache = flavor;
+          return flavor;
         })
         .finally(() => {
           this.flavorInFlight = null;
@@ -278,11 +282,15 @@ export class EasyPanelClient {
     return this.flavorInFlight;
   }
 
-  private async detectFlavor(): Promise<ApiFlavor> {
+  private async detectFlavor(): Promise<{ flavor: ApiFlavor; cacheable: boolean }> {
     // ORDEM IMPORTA. O 2.33 mantém `/api/trpc/*` e `/api/rpc/*` vivos respondendo
     // `{"json":...}` — sondar a rota antiga primeiro classificaria um painel 2.33
     // como "rpc". `GET /api/getUpdateStatus` só existe na API pública (2.33+),
     // é leitura sem input e ainda entrega a versão do painel de brinde.
+    //
+    // `conclusiva` separa "o painel respondeu que essa rota não existe" (404/401 →
+    // é mesmo um painel antigo) de "não deu para saber" (rede caiu, 502 do proxy).
+    let sondaPublicaConclusiva = true;
     try {
       const res = await fetch(`${this.baseUrl}/api/getUpdateStatus`, { headers: this.headers() });
       if (res.ok) {
@@ -292,11 +300,23 @@ export class EasyPanelClient {
           process.stderr.write(
             `[easypanel-mcp] painel ${this.panelVersion ?? "?"} — usando a API pública (/api/<procedure>).\n`
           );
-          return "public";
+          return { flavor: "public", cacheable: true };
         }
+        // 200 com corpo inesperado: não dá para afirmar que não é público.
+        sondaPublicaConclusiva = false;
+      } else if (res.status >= 500) {
+        sondaPublicaConclusiva = false; // proxy/painel com problema momentâneo
       }
+      // 404/401/403 → a rota realmente não existe: painel ≤ 2.32. Conclusivo.
     } catch {
-      /* painel antigo ou corpo não-JSON — segue para as sondas legadas */
+      // Falha de rede/corpo não-JSON: pode ser um painel antigo OU um soluço.
+      sondaPublicaConclusiva = false;
+    }
+    if (!sondaPublicaConclusiva) {
+      process.stderr.write(
+        `[easypanel-mcp] aviso: a sonda da API pública não foi conclusiva; ` +
+          `a geração detectada abaixo não será cacheada e a próxima chamada tenta de novo.\n`
+      );
     }
     // `update.getStatus` é uma query sem input que existe nas gerações antigas —
     // a forma do corpo entrega qual delas o painel fala.
@@ -305,7 +325,7 @@ export class EasyPanelClient {
         headers: this.headers(),
       });
       const f = flavorFromBody(JSON.parse(await res.text()));
-      if (f) return f;
+      if (f) return { flavor: f, cacheable: sondaPublicaConclusiva };
     } catch {
       /* corpo não-JSON (SPA/proxy) — tenta a rota nova abaixo */
     }
@@ -313,7 +333,9 @@ export class EasyPanelClient {
       const res = await fetch(`${this.baseUrl}/api/rpc/update/getStatus`, {
         headers: this.headers(),
       });
-      if (res.ok && flavorFromBody(JSON.parse(await res.text())) === "rpc") return "rpc";
+      if (res.ok && flavorFromBody(JSON.parse(await res.text())) === "rpc") {
+        return { flavor: "rpc", cacheable: sondaPublicaConclusiva };
+      }
     } catch {
       /* segue para o erro acionável */
     }
@@ -324,8 +346,13 @@ export class EasyPanelClient {
     );
   }
 
-  /** Painéis ≥ 2.33 têm start/stop/restart de compose documentados na API pública. */
-  async supportsComposeLifecycle(): Promise<boolean> {
+  /**
+   * O painel fala a API pública (≥ 2.33)? Além do transporte, isso decide o que
+   * as tools podem oferecer: só ali o ciclo de vida de compose
+   * (start/stop/restart) e as procedures de banco por nome achatado existem
+   * documentados. Nos painéis antigos as tools orientam em vez de chutar.
+   */
+  async isPublicApi(): Promise<boolean> {
     return (await this.getFlavor()) === "public";
   }
 
@@ -426,13 +453,39 @@ export class EasyPanelClient {
 
     // Procedure fora do spec público (ex.: o painel renomeou algo): as tools
     // curadas ainda funcionam pelo transporte interno, que segue vivo no 2.33.
-    if (!flat || !op) return this.internalRpcCall<T>(procedure, input, "leitura fora do spec público");
+    if (!flat || !op) {
+      const internal = internalNameFor(procedure);
+      if (!internal) {
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `A operação "${procedure}" não está no OpenAPI público do painel e não tem equivalente ` +
+            `interno conhecido. Confira o nome em GET ${this.baseUrl}/api/openapi.json.`
+        );
+      }
+      return this.internalRpcCall<T>(internal, input, "leitura fora do spec público");
+    }
 
     const params = toQueryParams(input);
     // Input com valor não-string não cabe na query string deste painel (zod sem
     // coerção). A classificação já foi feita pelo spec acima, então cair no
     // transporte interno aqui é seguro: sabemos que é leitura.
-    if (!params) return this.internalRpcCall<T>(procedure, input, "input com valor não-string");
+    if (!params) {
+      const internal = internalNameFor(flat);
+      if (!internal) {
+        // A operação existe e é leitura, mas não há como chamá-la: o painel
+        // recusa número/array na query string e não conhecemos o nome interno
+        // para rotear pelo /api/rpc. Dizer isso é melhor que alegar (falsamente)
+        // que a operação não existe.
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `A leitura "${procedure}" recebeu um parâmetro não-string, e este painel valida query ` +
+            `params sem coerção de tipo (número/array são recusados). O desvio para o transporte ` +
+            `interno precisa do nome com namespace — chame-a como "namespace.${flat}" ou passe ` +
+            `apenas parâmetros string.`
+        );
+      }
+      return this.internalRpcCall<T>(internal, input, "input com valor não-string");
+    }
 
     const qs = params.toString();
     const res = await fetch(`${this.baseUrl}/api/${flat}${qs ? `?${qs}` : ""}`, {
@@ -446,15 +499,7 @@ export class EasyPanelClient {
    * escape para o que a API pública não consegue expressar; nos painéis
    * 2.31–2.32 é o transporte principal.
    */
-  private async internalRpcCall<T>(procedure: string, input: unknown, motivo: string): Promise<T> {
-    const internal = internalNameFor(procedure);
-    if (!internal) {
-      throw new McpError(
-        ErrorCode.InvalidRequest,
-        `A procedure "${procedure}" não está no OpenAPI público do painel e não tem equivalente ` +
-          `interno conhecido. Confira o nome em GET ${this.baseUrl}/api/openapi.json.`
-      );
-    }
+  private async internalRpcCall<T>(internal: string, input: unknown, motivo: string): Promise<T> {
     process.stderr.write(
       `[easypanel-mcp] ${internal}: usando o transporte interno /api/rpc (motivo: ${motivo}).\n`
     );
@@ -484,12 +529,17 @@ export class EasyPanelClient {
     if (flavor === "public") {
       return this.publicQuery<T>(procedure, input, Boolean(opts.requireDocumentedQuery));
     }
+    // Gerações antigas só entendem o nome com namespace. A doc do 2.33 e o
+    // easypanel_raw usam o achatado, então traduzimos quando conhecido — sem
+    // isso, `listCertificates` num painel 2.32 viraria /api/rpc/listCertificates (404).
+    const legacy = internalNameFor(procedure) ?? procedure;
+
     if (flavor === "rpc") {
       // 2.31–2.32: queries com input só funcionam via POST {"json": ...} (o GET
       // documentado responde 400). Como POST executa qualquer procedure, o guard
       // abaixo impede que uma mutation passe por aqui "disfarçada" de leitura.
       const map = await this.getKindMap();
-      const kind = map?.get(procedure.toLowerCase());
+      const kind = map?.get(legacy.toLowerCase());
       if (kind === "mutation") {
         throw new McpError(
           ErrorCode.InvalidRequest,
@@ -508,20 +558,20 @@ export class EasyPanelClient {
               `leitura arbitrária recusada por segurança (fail-closed). Tente novamente ou use as tools dedicadas.`
         );
       }
-      const res = await fetch(`${this.baseUrl}${rpcPath(procedure)}`, {
+      const res = await fetch(`${this.baseUrl}${rpcPath(legacy)}`, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({ json: input ?? {} }),
       });
-      return this.parse<T>(res, procedure, true);
+      return this.parse<T>(res, legacy, true);
     }
     // ≤ 2.30 (tRPC): GET com ?input={"json":...}
-    let url = `${this.baseUrl}/api/trpc/${procedure}`;
+    let url = `${this.baseUrl}/api/trpc/${legacy}`;
     if (input !== undefined) {
       url += `?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
     }
     const res = await fetch(url, { headers: this.headers() });
-    return this.parse<T>(res, procedure, true);
+    return this.parse<T>(res, legacy, true);
   }
 
   async mutate<T>(procedure: string, input?: unknown): Promise<T> {
@@ -548,7 +598,15 @@ export class EasyPanelClient {
         );
       }
       if (!flat || !op) {
-        return this.internalRpcCall<T>(procedure, input, "escrita fora do spec público");
+        const internal = internalNameFor(procedure);
+        if (!internal) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            `A operação "${procedure}" não está no OpenAPI público do painel e não tem equivalente ` +
+              `interno conhecido. Confira o nome em GET ${this.baseUrl}/api/openapi.json.`
+          );
+        }
+        return this.internalRpcCall<T>(internal, input, "escrita fora do spec público");
       }
       const res = await fetch(`${this.baseUrl}/api/${flat}`, {
         method: "POST",
@@ -558,16 +616,18 @@ export class EasyPanelClient {
       return this.parse<T>(res, flat, false);
     }
 
+    // Gerações antigas só entendem o nome com namespace (ver `query`).
+    const legacy = internalNameFor(procedure) ?? procedure;
     const url =
       flavor === "rpc"
-        ? `${this.baseUrl}${rpcPath(procedure)}`
-        : `${this.baseUrl}/api/trpc/${procedure}`;
+        ? `${this.baseUrl}${rpcPath(legacy)}`
+        : `${this.baseUrl}/api/trpc/${legacy}`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ json: input ?? {} }),
     });
-    return this.parse<T>(res, procedure, true);
+    return this.parse<T>(res, legacy, true);
   }
 
   /**
