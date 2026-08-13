@@ -9,9 +9,15 @@
  *
  * Uso:
  *   EASYPANEL_URL=... EASYPANEL_TOKEN=... npx tsx scripts/check-api-drift.ts
- *   ... --update    reescreve o snapshot com o spec atual (para revisar no diff)
+ *   ... --update     reescreve o snapshot com o spec atual (para revisar no diff)
+ *   ... --optional   sem as env vars, avisa e sai 0 em vez de falhar
  *
  * Sai com código 1 se houver divergência que afete as procedures mapeadas.
+ *
+ * `--optional` é o que permite plugar isto no `prepublishOnly`: na máquina de
+ * quem publica as variáveis existem (é a mesma config do MCP), então o publish
+ * confere a API de verdade antes de subir o pacote; em qualquer outro lugar
+ * (CI de fork, clone sem painel) o passo simplesmente não roda.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { PUBLIC_PROCEDURES } from "../src/procedures.js";
@@ -27,18 +33,47 @@ interface Fixture {
   ops: Record<string, { method: "get" | "post"; params?: Record<string, string> }>;
 }
 
+const opcional = process.argv.includes("--optional");
 const url = process.env.EASYPANEL_URL?.replace(/\/$/, "");
 const token = process.env.EASYPANEL_TOKEN;
+
+if (process.env.SKIP_API_CHECK) {
+  console.log("SKIP_API_CHECK definido — verificação de drift pulada.");
+  process.exit(0);
+}
 if (!url || !token) {
+  if (opcional) {
+    console.log(
+      "EASYPANEL_URL/EASYPANEL_TOKEN não definidos — verificação de drift pulada.\n" +
+        "(Defina-os para conferir a API do painel de verdade antes de publicar.)"
+    );
+    process.exit(0);
+  }
   console.error("EASYPANEL_URL e EASYPANEL_TOKEN são obrigatórios.");
   process.exit(2);
 }
 
-const res = await fetch(`${url}/api/openapi.json`, {
-  headers: { Authorization: `Bearer ${token}` },
-});
+// Painel fora do ar não é drift. Em modo opcional isso não pode barrar um
+// publish — só drift de verdade barra.
+let res: Response;
+try {
+  res = await fetch(`${url}/api/openapi.json`, { headers: { Authorization: `Bearer ${token}` } });
+} catch (err) {
+  const msg = `Não foi possível falar com o painel: ${(err as Error).message}`;
+  if (opcional) {
+    console.log(`${msg} — verificação de drift pulada.`);
+    process.exit(0);
+  }
+  console.error(msg);
+  process.exit(2);
+}
 if (!res.ok) {
-  console.error(`Falha ao ler /api/openapi.json: HTTP ${res.status}`);
+  const msg = `Falha ao ler /api/openapi.json: HTTP ${res.status}`;
+  if (opcional) {
+    console.log(`${msg} — verificação de drift pulada.`);
+    process.exit(0);
+  }
+  console.error(msg);
   process.exit(2);
 }
 const spec = JSON.parse(await res.text());

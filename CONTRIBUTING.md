@@ -48,16 +48,39 @@ flat public API) — every time, a user found out first. Two things guard agains
 
 - **Contract tests** (`test/procedures.test.ts`) check every mapped procedure
   against a committed snapshot of a real panel spec
-  (`test/fixtures/easypanel-2.33-ops.json`). These catch *our* regressions.
+  (`test/fixtures/easypanel-2.33-ops.json`). These catch *our* regressions, and
+  run in CI on every push with no credentials.
 - **Drift check** (`npm run check:api`) compares that snapshot against a **live**
-  panel. This catches *their* changes. It runs weekly in CI and opens an issue on
-  divergence; the `EASYPANEL_URL` / `EASYPANEL_TOKEN` repo secrets enable it
-  (the job skips cleanly without them — forks need no setup).
+  panel. This catches *their* changes.
+
+The drift check runs automatically as part of `prepublishOnly`, so **publishing a
+release verifies the API for real first** — on the publisher's machine the panel
+credentials are already there (same config the MCP uses), and a mapped procedure
+that vanished or changed HTTP method **aborts the publish**. Anywhere without
+credentials (a fresh clone, a fork's CI) the step prints a notice and passes; an
+unreachable panel never blocks a release either. Override with `SKIP_API_CHECK=1`.
 
 ```bash
-EASYPANEL_URL=https://panel.example.com EASYPANEL_TOKEN=... npm run check:api
-# add --update to rewrite the snapshot with the current spec, then review the diff
+npm run check:api            # uses EASYPANEL_URL / EASYPANEL_TOKEN from the environment
+npm run check:api -- --update  # rewrite the snapshot with the current spec, then review the diff
 ```
+
+### About the weekly CI drift job
+
+`.github/workflows/api-drift.yml` can run the same check on a schedule and open
+an issue on divergence. **It is off by default and that is deliberate.**
+
+An Easypanel API token carries the permissions of its user, and an admin token
+controls the whole server — every project's databases and environment secrets.
+Storing one in a public repository's Actions secrets, for a convenience check, is
+a bad trade: the blast radius of a leak is the entire production server, while the
+prepublish gate above already catches drift at the moment it matters, with the
+credential never leaving the maintainer's machine.
+
+If you still want the scheduled job, create a **dedicated non-admin user** in the
+panel and use its token — never the admin one — and set `EASYPANEL_URL` /
+`EASYPANEL_TOKEN` as repo secrets. The job only issues `GET /api/openapi.json`.
+It is not triggered by `pull_request`, so fork PRs cannot read the secrets.
 
 ## Security
 
