@@ -1,0 +1,100 @@
+name: Easypanel API drift
+
+# Este projeto já foi quebrado três vezes pelo painel mudando a API por baixo
+# (2.31, 2.32, 2.33) — e nas três a descoberta veio pelo usuário. Os testes
+# normais comparam o código com um snapshot commitado; este job compara o
+# snapshot com um painel de verdade e abre uma issue quando divergem.
+#
+# Requer os secrets EASYPANEL_URL e EASYPANEL_TOKEN. Sem eles o job é pulado
+# (não falha) — um fork não precisa configurar nada.
+# Use um token de um painel de teste, ou de produção com escopo de leitura:
+# o script só faz GET /api/openapi.json.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # segundas, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Secrets configurados?
+        id: cfg
+        env:
+          EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+        run: |
+          if [ -n "$EASYPANEL_URL" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EASYPANEL_URL/EASYPANEL_TOKEN não configurados — verificação de drift pulada."
+          fi
+
+      - name: Comparar o snapshot com o painel
+        if: steps.cfg.outputs.ok == 'true'
+        id: check
+        env:
+          EASYPANEL_URL: ${{ secrets.EASYPANEL_URL }}
+          EASYPANEL_TOKEN: ${{ secrets.EASYPANEL_TOKEN }}
+        run: |
+          set +e
+          npx tsx scripts/check-api-drift.ts > drift.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat drift.txt
+
+      - name: Abrir/atualizar issue de drift
+        if: steps.cfg.outputs.ok == 'true' && steps.check.outputs.exit != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const relatorio = fs.readFileSync('drift.txt', 'utf8');
+            const titulo = 'A API do Easypanel mudou — procedures mapeadas divergiram';
+            const corpo = [
+              'A verificação semanal encontrou divergência entre `src/procedures.ts` e o painel.',
+              '',
+              '```',
+              relatorio.trim(),
+              '```',
+              '',
+              'Para atualizar o snapshot depois de conferir:',
+              '```bash',
+              'EASYPANEL_URL=... EASYPANEL_TOKEN=... npx tsx scripts/check-api-drift.ts --update',
+              '```',
+              '',
+              `_Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}_`,
+            ].join('\n');
+
+            const abertas = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'api-drift',
+            });
+            if (abertas.data.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: abertas.data[0].number, body: corpo,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: titulo, body: corpo, labels: ['api-drift'],
+              });
+            }
+
+      - name: Falhar se houve drift
+        if: steps.cfg.outputs.ok == 'true' && steps.check.outputs.exit != '0'
+        run: exit 1

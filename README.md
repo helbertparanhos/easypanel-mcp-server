@@ -7,6 +7,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/network/members)
 [![GitHub Issues](https://img.shields.io/github/issues/helbertparanhos/easypanel-mcp-server?style=flat-square)](https://github.com/helbertparanhos/easypanel-mcp-server/issues)
+[![CI](https://github.com/helbertparanhos/easypanel-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/helbertparanhos/easypanel-mcp-server/actions/workflows/ci.yml)
 [![Glama Quality](https://glama.ai/mcp/servers/helbertparanhos/easypanel-mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/helbertparanhos/easypanel-mcp-server)
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
