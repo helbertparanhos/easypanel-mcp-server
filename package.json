@@ -46,7 +46,7 @@
     "url": "https://github.com/helbertparanhos/easypanel-mcp-server/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "ws": "8.21.0",
     "zod": "3.25.76"
   },
