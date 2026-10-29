@@ -64,7 +64,7 @@ Easypanel 2.33 also ships its own MCP endpoint (`/api/mcp`, connection details n
 | Live Docker events | — | ✅ `get_docker_events` |
 | Read-only mode | — | ✅ `MCP_ACCESS_MODE=readonly` blocks every write at the source |
 | Confirmation gate on destructive ops | — | ✅ `confirm: "CONFIRMO"` |
-| Secret redaction (`list_users`) | — | ✅ strips `apiToken` / `twoFactorSecret` |
+| Secret masking on every tool response | — | ✅ env values, passwords, tokens, deploy-webhook token, credentials in URLs |
 | Env var read-modify-write | — | ✅ never clobbers other variables |
 | Connection-string building | — | ✅ `inspect_database` |
 | Coverage of every API operation | ✅ | ✅ via `easypanel_raw` |
@@ -159,7 +159,7 @@ Then your `.cursor/mcp.json` uses references that apply automatically to every p
 | `EASYPANEL_TOKEN` | ✅ | — | API token (Easypanel → Settings → API → Generate Token) |
 | `MCP_ACCESS_MODE` | — | `full` | Set to `readonly` to block **all** writes (curated tools **and** `easypanel_raw`). Reads stay available — ideal for connecting to a production panel for inspection only. |
 | `EASYPANEL_API_FLAVOR` | — | _(auto)_ | Force the panel's API generation instead of auto-detecting: `trpc` (≤ 2.30), `rpc` (2.31–2.32) or `public` (≥ 2.33). Aliases: `legacy` / `modern`. Leave unset unless you have a reason — a stale `rpc` pin keeps a 2.33 panel on the internal API. |
-| `EASYPANEL_RAW_DISABLED` | — | _(enabled)_ | Set to `1` to fully disable the `easypanel_raw` escape hatch. Recommended when the MCP is exposed to untrusted content (prompt-injection risk), since `easypanel_raw` reads can return secrets and are **not** covered by read-only mode. |
+| `EASYPANEL_RAW_DISABLED` | — | _(enabled)_ | Set to `1` to fully disable the `easypanel_raw` escape hatch. Recommended when the MCP is exposed to untrusted content (prompt-injection risk), since `easypanel_raw` reads are **not** covered by read-only mode and secret masking is best-effort (by name and shape). |
 
 ---
 
@@ -275,14 +275,24 @@ Set `MCP_ACCESS_MODE=readonly` to block **every** write at the source (`client.m
 ### Raw escape-hatch controls
 `easypanel_raw` validates the operation name (flat or `namespace.procedure`, no path/query injection), requires the `input` to be an object (≤ 50KB), and demands `CONFIRMO` for any mutation. Set `EASYPANEL_RAW_DISABLED=1` to turn it off entirely.
 
-### Secret redaction
+### User redaction
 `list_users` strips `apiToken`, `twoFactorSecret` and password fields before returning — only `id`, `email`, `admin`, `twoFactorEnabled` and `createdAt` reach the model.
 
 ### Safe env vars (read-modify-write)
 `set_env_var` and `delete_env_var` read the current state, apply only the requested change, and write back. The Easypanel API replaces the entire env string on every update — without this protection it is easy to accidentally wipe all variables at once.
 
-### Sensitive value masking
-`get_env_vars` masks values whose key matches `*SECRET*`, `*PASSWORD*`, `*TOKEN*`, `*KEY*` by default. Pass `include_values: true` to reveal.
+### Secret masking on every response
+Every tool result — including `easypanel_raw` — goes through one central masking step (`src/mascarar.ts`) before it reaches the model. Masked values become `***`, with nothing of the original kept:
+
+- **Fields with a sensitive name, at any depth** — `secret`, `password`/`pwd`/`pass`, `token`, `key`, `credential`, `private`, `auth`, `pepper`, `salt`, `cookie`, `webhook`, `deploymentUrl`/`deployUrl`. Everything under such a field is masked (booleans/null are kept); `{ key: "X_SECRET", value: "..." }` pairs mask the `value`.
+- **The deploy-webhook token** in any string: `…/api/deploy/<token>` → `…/api/deploy/***`.
+- **Env as text** (`KEY=value` per line, the way Easypanel stores it, plus compose `KEY: value` / `- KEY=value` and inline `-e KEY=value` / `?api_key=`): the value is masked when the key is sensitive.
+- **Credentials embedded in URLs** — `postgres://user:pass@host/db`, `https://user:token@github.com/...` (env values, git sources, connection strings) → `postgres://***@host/db`. Scheme, host, port and path stay.
+- `Bearer <token>` and PEM `PRIVATE KEY` blocks.
+
+Names, images, domains, ports, replicas and other non-sensitive fields pass through untouched. Masking is best-effort: a secret stored under an innocent name (`FOO=abc`) with no recognisable shape is not caught.
+
+Explicit exceptions, for calls whose purpose is to reveal: `get_env_vars` with `include_values: true` and `inspect_database` with `include_secrets: true` (both strictly the boolean `true`).
 
 ### Token never leaks
 HTTP errors and WebSocket failures are logged to stderr and surfaced to the model as a generic message — the bearer token (sent in the WebSocket query string, as Easypanel requires) never reaches the model context.

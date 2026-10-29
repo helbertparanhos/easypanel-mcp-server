@@ -217,8 +217,9 @@ test("serializeEnvVars escapa newlines literais (anti-injeção de var)", () => 
 test("maskSensitiveValues mascara chaves sensíveis e preserva o resto", () => {
   const vars = { DATABASE_PASSWORD: "supersecret", API_TOKEN: "abcd1234", PORT: "3000" };
   const masked = maskSensitiveValues(vars, false);
-  assert.equal(masked.DATABASE_PASSWORD, "***cret");
-  assert.equal(masked.API_TOKEN, "***1234");
+  // Desde a v3.0.1 não sobra pedaço nenhum do valor (antes ficavam os 4 últimos).
+  assert.equal(masked.DATABASE_PASSWORD, "***");
+  assert.equal(masked.API_TOKEN, "***");
   assert.equal(masked.PORT, "3000", "não-sensível fica intacto");
   // reveal=true devolve tudo
   assert.deepEqual(maskSensitiveValues(vars, true), vars);

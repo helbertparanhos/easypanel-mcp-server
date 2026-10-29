@@ -10,7 +10,7 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `get_project`: Get full details of a project including all services
 - `create_project`: Create a new project
 - `delete_project`: Permanently delete a project and all its services — requires confirm: "CONFIRMO"
-- `inspect_service`: Get complete service config: source, env vars, deploy settings, mounts, ports, resources. Routes by service type (app, compose, databases). Use BEFORE any update to preserve current state.
+- `inspect_service`: Get complete service config: source, env vars, deploy settings, mounts, ports, resources. Routes by service type (app, compose, databases). Secrets (sensitive env values, deploy-webhook token, URL credentials) are masked. Use BEFORE any update to preserve current state.
 - `create_service`: Create a new app service in a project
 - `rename_service`: Rename or move a service — requires confirm: "CONFIRMO"
 - `destroy_service`: Permanently destroy a service — requires confirm: "CONFIRMO"
@@ -28,7 +28,7 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `disable_github_deploy`: Disable GitHub auto-deploy
 - `list_actions`: List running or recent deploy/build jobs (filterable by projectName/serviceName/type) — use to track deploy progress
 - `get_action`: Get details and logs of a specific action by ID
-- `get_env_vars`: List all environment variables. Sensitive values (KEY, SECRET, TOKEN, PASSWORD) are masked by default. Use include_values: true to reveal.
+- `get_env_vars`: List all environment variables. Sensitive values (KEY, SECRET, TOKEN, PASSWORD, PEPPER...) and credentials inside URLs are masked by default. Use include_values: true to reveal — the only way to get env secrets back.
 - `set_env_var`: Add or update ONE env var safely — reads current state before writing, never wipes other vars
 - `delete_env_var`: Remove ONE env var — requires confirm: "CONFIRMO"
 - `get_service_logs`: Get live container runtime logs via WebSocket (last N lines, max 500)
@@ -40,7 +40,7 @@ easypanel-mcp-server is a Model Context Protocol server that exposes 57 tools fo
 - `remove_domain`: Remove a domain — requires confirm: "CONFIRMO"
 - `set_primary_domain`: Set the primary domain for a service
 - `create_database`: Create a Postgres, MySQL, MariaDB, MongoDB or Redis service
-- `inspect_database`: Get database details including credentials and connection string
+- `inspect_database`: Get database details and connection string. Password and URL credential are masked unless include_secrets: true
 - `destroy_database`: Permanently destroy a database and all its data — requires confirm: "CONFIRMO"
 - `get_docker_stats`: Get Docker task state per service — running replicas (actual) vs desired. For CPU/memory of one service use get_service_stats
 - `get_storage_stats`: Get server storage usage
@@ -98,12 +98,12 @@ Every response that touches a project/service starts with a context banner:
 [Contexto ativo: projeto="my-project" | serviço="my-api"]
 ```
 
-Destructive actions (delete, destroy, stop, prune, reboot) return `status: "BLOQUEADO"` unless `confirm: "CONFIRMO"` is passed explicitly. Env var updates use read-modify-write to never accidentally wipe existing variables. `list_users` redacts apiToken/2FA secret/password. Read-only mode (`MCP_ACCESS_MODE=readonly`) blocks all writes at the source.
+Destructive actions (delete, destroy, stop, prune, reboot) return `status: "BLOQUEADO"` unless `confirm: "CONFIRMO"` is passed explicitly. Env var updates use read-modify-write to never accidentally wipe existing variables. `list_users` redacts apiToken/2FA secret/password. Every tool response (including `easypanel_raw`) is passed through central secret masking: sensitive field names at any depth, env `KEY=value` text, the deploy-webhook token (`/api/deploy/***`) and credentials embedded in URLs become `***`. Read-only mode (`MCP_ACCESS_MODE=readonly`) blocks all writes at the source.
 
 ## Known limitations
 
 - WordPress/Box service types have no dedicated tools — reach them via `easypanel_raw` (`inspectWordPressService`, `createBoxService`)
-- `easypanel_raw` reads bypass read-only mode and can return secrets — use `EASYPANEL_RAW_DISABLED=1` in untrusted environments
+- `easypanel_raw` reads bypass read-only mode; their results are masked like every other tool, but masking is best-effort (by name and shape) — use `EASYPANEL_RAW_DISABLED=1` in untrusted environments
 - `list_nodes` returns the local node only on single-server setups (no Swarm cluster)
 - Docker events are real-time only (no history) — an idle server may return an empty window
 

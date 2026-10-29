@@ -8,9 +8,10 @@ import {
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
 import { allTools, handleTool } from "./tools/index.js";
+import { mascararTexto } from "./mascarar.js";
 
 const server = new Server(
-  { name: "easypanel-mcp", version: "3.0.0" },
+  { name: "easypanel-mcp", version: "3.0.1" },
   { capabilities: { tools: {} } }
 );
 
@@ -22,7 +23,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return await handleTool(name, (args ?? {}) as Record<string, unknown>);
   } catch (error: any) {
     if (error instanceof McpError) throw error;
-    throw new McpError(ErrorCode.InternalError, error?.message ?? String(error));
+    // Erro inesperado pode carregar trecho de resposta do painel — passa pelo
+    // mesmo mascaramento por forma das respostas normais.
+    throw new McpError(ErrorCode.InternalError, mascararTexto(error?.message ?? String(error)));
   }
 });
 

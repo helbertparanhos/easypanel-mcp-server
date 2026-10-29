@@ -6,7 +6,7 @@ export const serviceTools: Tool[] = [
   {
     name: "inspect_service",
     description:
-      "Retorna configuração completa de um serviço: source, env vars, deploy config, mounts, ports, domínios, recursos. Use SEMPRE antes de qualquer update para preservar o estado.",
+      "Retorna configuração completa de um serviço: source, env vars, deploy config, mounts, ports, domínios, recursos. Segredos (valores de env sensíveis, token do webhook de deploy, credenciais em URL) vêm mascarados — para valores de env use get_env_vars com include_values: true. Use SEMPRE antes de qualquer update para preservar o estado.",
     inputSchema: {
       type: "object",
       properties: {
