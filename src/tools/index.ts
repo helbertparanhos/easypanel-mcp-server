@@ -14,6 +14,7 @@ import { portTools, handlePortTool } from "./ports.js";
 import { composeTools, handleComposeTool } from "./compose.js";
 import { serverTools, handleServerTool } from "./server.js";
 import { rawTools, handleRawTool } from "./raw.js";
+import { mascararResultado, devolveSegredos } from "../mascarar.js";
 
 export const allTools: Tool[] = [
   ...projectTools,
@@ -52,7 +53,19 @@ const serverToolNames = new Set(serverTools.map((t) => t.name));
 // skills, prompts e scripts salvos que ainda o chamam pelo nome antigo.
 const rawToolNames = new Set([...rawTools.map((t) => t.name), "trpc_raw"]);
 
+/**
+ * Ponto único de saída das tools: todo resultado passa pelo mascaramento de
+ * segredos antes de chegar ao cliente MCP (ver `src/mascarar.ts`). Fica aqui, e
+ * não em cada tool, para que uma tool nova — ou o `easypanel_raw` — não tenha
+ * como esquecer. As únicas exceções são os pedidos explícitos de revelar
+ * (`devolveSegredos`).
+ */
 export async function handleTool(name: string, args: Record<string, unknown>) {
+  const resultado = await despachar(name, args);
+  return devolveSegredos(name, args) ? resultado : mascararResultado(resultado);
+}
+
+async function despachar(name: string, args: Record<string, unknown>) {
   if (projectToolNames.has(name)) return handleProjectTool(name, args);
   if (serviceToolNames.has(name)) return handleServiceTool(name, args);
   if (deployToolNames.has(name)) return handleDeployTool(name, args);

@@ -26,7 +26,7 @@ Thank you for your interest in contributing!
 ```bash
 npm ci
 npm run build     # tsc
-npm test          # 51 tests, no network
+npm test          # 72 tests, no network
 ```
 
 CI runs build + tests on Node 18/20/22 for every push and PR.

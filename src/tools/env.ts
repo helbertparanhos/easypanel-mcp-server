@@ -2,14 +2,13 @@ import { Tool, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { getClient } from "../client.js";
 import { contextHeader, guardDestructive, ok, CONFIRM_KEYWORD } from "../context.js";
 import { resolveServiceType, type ServiceType } from "./services.js";
-
-const SENSITIVE_PATTERN = /secret|password|token|key|pwd|credential|private|auth/i;
+import { chaveSensivel, mascararTexto, MASCARA } from "../mascarar.js";
 
 export const envTools: Tool[] = [
   {
     name: "get_env_vars",
     description:
-      "Lista as variáveis de ambiente do serviço. Valores de variáveis sensíveis (KEY, SECRET, PASSWORD, TOKEN) são mascarados por padrão. Use include_values: true para ver os valores completos.",
+      "Lista as variáveis de ambiente do serviço. Valores de variáveis sensíveis (KEY, SECRET, PASSWORD, TOKEN, PEPPER...) e credenciais em URL (postgres://user:senha@host) são mascarados por padrão. Use include_values: true para ver os valores completos — é a única tool que devolve segredo de env.",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,16 +77,20 @@ export function serializeEnvVars(vars: Record<string, string>): string {
     .join("\n");
 }
 
+/**
+ * Mascara os valores de env: chave sensível → `***` (sem manter pedaço do valor,
+ * como até a v3.0.0 fazia com os 4 últimos caracteres); demais valores passam pelo
+ * mascaramento por forma (credencial em URL, token de deploy). O `handleTool`
+ * aplica o mesmo mascaramento de novo na saída — aqui é para a contagem
+ * `masked_vars` refletir o que foi escondido.
+ */
 export function maskSensitiveValues(
   vars: Record<string, string>,
   reveal: boolean
 ): Record<string, string> {
   if (reveal) return vars;
   return Object.fromEntries(
-    Object.entries(vars).map(([k, v]) => [
-      k,
-      SENSITIVE_PATTERN.test(k) ? `***${v.slice(-4)}` : v,
-    ])
+    Object.entries(vars).map(([k, v]) => [k, chaveSensivel(k) ? MASCARA : mascararTexto(v)])
   );
 }
 
@@ -143,10 +146,12 @@ export async function handleEnvTool(name: string, args: Args) {
   }
 
   if (name === "get_env_vars") {
-    const { include_values = false } = args as { include_values?: boolean };
+    // Estrito: só o booleano `true` revela (a mesma regra de `devolveSegredos`,
+    // que decide se a saída escapa do mascaramento central).
+    const include_values = (args as { include_values?: unknown }).include_values === true;
     const vars = await readCurrentEnv();
-    const displayed = maskSensitiveValues(vars, Boolean(include_values));
-    const sensitiveCount = Object.keys(vars).filter((k) => SENSITIVE_PATTERN.test(k)).length;
+    const displayed = maskSensitiveValues(vars, include_values);
+    const sensitiveCount = Object.keys(vars).filter((k) => displayed[k] !== vars[k]).length;
     return {
       content: [
         {

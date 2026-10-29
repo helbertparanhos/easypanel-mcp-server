@@ -38,7 +38,8 @@ export function isValidProcedureName(procedure: unknown): boolean {
 // confiável (risco de prompt injection), defina EASYPANEL_RAW_DISABLED=1 para
 // desligar o easypanel_raw por completo — readonly NÃO protege contra leituras, e o
 // easypanel_raw pode ler qualquer procedure (ex.: inspectService de outro projeto
-// devolve env vars com secrets). Lido a cada chamada para refletir runtime/testes.
+// devolve env vars). O mascaramento central (src/mascarar.ts) esconde o que tem
+// nome ou forma de segredo, mas é best-effort. Lido a cada chamada para refletir runtime/testes.
 function isRawDisabled(): boolean {
   const v = (process.env.EASYPANEL_RAW_DISABLED || "").toLowerCase();
   return v === "1" || v === "true" || v === "yes";
@@ -47,7 +48,7 @@ function isRawDisabled(): boolean {
 export const rawTools: Tool[] = [
   {
     name: "easypanel_raw",
-    description: `Chama diretamente qualquer operação da API do Easypanel (~375) não coberta pelas tools dedicadas. Use para recursos avançados: Traefik, branding, Cloudflare Tunnel, Box, WordPress, backups de volume/banco, notificações, storage providers, etc. Leitura (isMutation=false) é o padrão. ⚠️ Reads podem retornar dados sensíveis (env vars/secrets de qualquer projeto). Para escrita, passe isMutation:true E confirm:"${CONFIRM_KEYWORD}" — escritas arbitrárias pulam as proteções das tools curadas. Para descobrir os nomes disponíveis, leia GET <painel>/api/openapi.json.`,
+    description: `Chama diretamente qualquer operação da API do Easypanel (~375) não coberta pelas tools dedicadas. Use para recursos avançados: Traefik, branding, Cloudflare Tunnel, Box, WordPress, backups de volume/banco, notificações, storage providers, etc. Leitura (isMutation=false) é o padrão. Segredos na resposta (env, senhas, tokens, credenciais em URL) vêm mascarados, como nas demais tools — o mascaramento é por nome e forma, então reads ainda podem expor dado sensível de nome inocente. Para escrita, passe isMutation:true E confirm:"${CONFIRM_KEYWORD}" — escritas arbitrárias pulam as proteções das tools curadas. Para descobrir os nomes disponíveis, leia GET <painel>/api/openapi.json.`,
     inputSchema: {
       type: "object",
       properties: {

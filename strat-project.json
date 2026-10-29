@@ -4,7 +4,7 @@
   "type": "mcp-server",
   "description": "MCP TypeScript com 57 tools + acesso raw à API para controle total do Easypanel via Claude. Fala as três gerações da API (tRPC ≤2.30, RPC 2.31–2.32 e a API pública do 2.33+) com auto-detecção.",
   "status": "stable",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "visibility": "public",
   "install": "npx -y easypanel-mcp-server",
   "homepage": "https://www.npmjs.com/package/easypanel-mcp-server",
@@ -27,5 +27,5 @@
     "docker"
   ],
   "owner": "Helbert Paranhos / Strat Academy",
-  "updated": "2026-08-12"
+  "updated": "2026-10-29"
 }

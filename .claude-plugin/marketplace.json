@@ -2,7 +2,7 @@
   "name": "easypanel-mcp-server",
   "displayName": "Easypanel MCP Server",
   "description": "Full control of Easypanel from Claude Code, Cursor and Claude Desktop — deploy (app & compose), runtime logs, container exec, env vars, domains, databases, volumes, ports, resource limits, Docker maintenance and monitoring. 57 tools with built-in safety guards, optional read-only mode, plus an easypanel_raw escape hatch to any of Easypanel's ~375 API operations.",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "author": "helbertparanhos",
   "license": "MIT",
   "category": "DevOps",

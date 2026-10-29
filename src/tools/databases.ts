@@ -31,7 +31,7 @@ export const databaseTools: Tool[] = [
   {
     name: "inspect_database",
     description:
-      "Retorna detalhes do banco de dados: credenciais, porta exposta, connection string e status.",
+      "Retorna detalhes do banco de dados: usuário, porta exposta, connection string e status. Senhas e a credencial da connection string vêm mascaradas por padrão; use include_secrets: true só quando precisar do valor (ex.: configurar a conexão de um app).",
     inputSchema: {
       type: "object",
       properties: {
@@ -41,6 +41,11 @@ export const databaseTools: Tool[] = [
           type: "string",
           enum: ["postgres", "mysql", "mariadb", "mongo", "redis"],
           description: "Tipo do banco de dados",
+        },
+        include_secrets: {
+          type: "boolean",
+          description: "Se true, devolve senhas e connection string completas (use com cautela)",
+          default: false,
         },
       },
       required: ["projectName", "serviceName", "type"],
@@ -125,7 +130,8 @@ export async function handleDatabaseTool(name: string, args: Args) {
             tipo: type,
             projectName,
             serviceName,
-            proximo_passo: "Use inspect_database para obter as credenciais e connection string",
+            proximo_passo:
+              "Use inspect_database para ver a conexão (include_secrets: true para a senha e a connection string completa)",
           }),
         },
       ],

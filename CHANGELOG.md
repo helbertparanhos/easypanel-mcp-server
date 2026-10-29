@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.0.1] - 2026-10-29
+
+### Security
+- **Nenhuma tool devolve mais segredo cru.** Até a v3.0.0 só o `get_env_vars` mascarava, e só por nome de chave; as demais repassavam o objeto do painel inteiro. Em uso real isso já pôs na conversa o **token do webhook de deploy** (`inspect_service` → `.../api/deploy/<token>`) e o **env completo** com senha de banco e pepper de token (`list_projects`/`get_project`/`get_env_vars`).
+- **Mascaramento central em `handleTool`** (`src/mascarar.ts`): todo resultado de tool passa por ele antes de sair, então uma tool nova não tem como esquecer. Vira `***`, sem manter pedaço do valor:
+  - campos de nome sensível em qualquer profundidade do JSON (`secret`, `password`/`pwd`/`pass`, `token`, `key`, `credential`, `private`, `auth`, `pepper`, `salt`, `cookie`, `webhook`, `deploymentUrl`/`deployUrl`) — tudo abaixo deles, inclusive objetos e arrays; pares `{ key|name, value }` mascaram o `value`;
+  - o token do webhook de deploy em qualquer string (`/api/deploy/***`);
+  - env em texto (`CHAVE=valor` por linha, como o Easypanel guarda; também `CHAVE: valor`/`- CHAVE=valor` de compose e `-e CHAVE=valor`/`?api_key=` no meio da linha) quando a chave é sensível;
+  - credencial embutida em URL — env, source git, connection string: `postgres://user:senha@host/db` → `postgres://***@host/db` (esquema, host, porta e caminho ficam);
+  - `Bearer <token>` e blocos PEM de chave privada.
+- **`easypanel_raw` também sai mascarado**, por padrão e sem opção de desligar.
+- **`get_env_vars` deixou de mostrar os 4 últimos caracteres** dos valores sensíveis (`***cret` → `***`) e passou a mascarar credencial em URL também (`DATABASE_URL`).
+- Mensagens de erro inesperadas passam pelo mesmo mascaramento por forma.
+
+### Changed
+- **Exceções explícitas**, só com o booleano `true` (a string `"true"` não revela): `get_env_vars` com `include_values: true` e o novo `include_secrets: true` do `inspect_database` — a tool que o `create_database` indica para pegar a senha e a connection string. `inspect_service` não ganhou opção de revelar: valores de env saem pelo `get_env_vars`, e o token de deploy fica no painel.
+
+### Internal
+- `test/mascarar.test.ts`: funções puras e ponta a ponta pelo `handleTool` contra um painel falso (sem rede, dados fictícios) — `inspect_service` com token de deploy, `get_project`, `get_env_vars` com e sem `include_values`, `easypanel_raw`, `inspect_database` (51 → 72 testes).
+
 ## [3.0.0] - 2026-08-12
 
 Suporte ao **Easypanel 2.33**, que publicou uma **API pública documentada** e passou a avisar que a interna "may change without notice and should not be relied upon". O MCP migrou para ela.
