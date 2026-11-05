@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.2] - 2026-11-05
+
+### Security
+- **Nomes de segredo em português agora são mascarados** (`segredo`, `senha`, `chave`, `credencial`, `privado`, por substring e sem diferenciar caixa). Até a v3.0.1 o padrão só conhecia os nomes em inglês, e um `list_projects` real devolveu `EMISSAO_SEGREDO` com o valor cru.
+
+### Internal
+- `test/mascarar.test.ts`: nomes em português no `chaveSensivel` e linha de env `EMISSAO_SEGREDO=` no `mascararTexto`.
+
 ## [3.0.1] - 2026-10-29
 
 ### Security
