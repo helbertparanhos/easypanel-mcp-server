@@ -72,15 +72,18 @@ test("chaveSensivel reconhece nomes de segredo em qualquer convenção", () => {
     "password", "DATABASE_PASSWORD", "apiToken", "token", "PAT_PEPPER", "JWT_SECRET",
     "privateKey", "SSH_KEY", "credentials", "basicAuth", "webhookUrl", "deploymentUrl",
     "deployUrl", "DB_PASS", "pwd", "PASSWORD_SALT", "SESSION_COOKIE",
+    // em português (até a v3.0.1 saíam crus: EMISSAO_SEGREDO num list_projects real)
+    "EMISSAO_SEGREDO", "SENHA_DB", "senhaAdmin", "CHAVE_PIX", "CREDENCIAIS", "CHAVE_PRIVADA",
   ]) {
     assert.equal(chaveSensivel(k), true, k);
   }
   for (const k of [
     "name", "image", "host", "domains", "PORT", "NODE_ENV", "DATABASE_URL", "replicas",
-    "passthrough", "autoDeploy", "key", "type", "projectName",
+    "passthrough", "autoDeploy", "key", "type", "projectName", "EMISSAO_DATA", "PLANE_WORKSPACE",
   ]) {
     assert.equal(chaveSensivel(k), false, k);
   }
+  assert.equal(mascararTexto("A=1\nEMISSAO_SEGREDO=abc123def\nB=2"), "A=1\nEMISSAO_SEGREDO=***\nB=2");
 });
 
 // ---------------------------------------------------------------------------

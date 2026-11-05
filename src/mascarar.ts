@@ -28,11 +28,12 @@ export const MASCARA = "***";
 
 /**
  * Nome de campo/variável que indica segredo. Casa por substring, sem diferenciar
- * caixa (`DATABASE_PASSWORD`, `apiToken`, `PAT_PEPPER`, `deploymentUrl`...).
+ * caixa (`DATABASE_PASSWORD`, `apiToken`, `PAT_PEPPER`, `deploymentUrl`...). Também em português
+ * (`EMISSAO_SEGREDO`, `SENHA_DB`, `CHAVE_PIX`, `CREDENCIAIS`, `CHAVE_PRIVADA`): até a v3.0.1 esses saíam crus.
  * `pass` sozinho só como segmento (`DB_PASS`), para não pegar `passthrough`.
  */
 export const SENSITIVE_PATTERN =
-  /secret|passw|pwd|token|key|credential|private|auth|pepper|webhook|salt|cookie|(?:^|[_.-])pass(?:$|[_.-])|deploy(?:ment)?[_-]?url/i;
+  /secret|passw|pwd|token|key|credential|private|auth|pepper|webhook|salt|cookie|segred|senha|chave|credenc|privad|(?:^|[_.-])pass(?:$|[_.-])|deploy(?:ment)?[_-]?url/i;
 
 /**
  * Nomes que casam o padrão mas não guardam segredo. `key` é o NOME da variável
